@@ -1077,9 +1077,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var labels = cel.querySelectorAll('[class*="label"], b, strong, dt');
     for (var i = 0; i < labels.length; i++) {
       if (/^\s*nome( do cliente)?\s*:?\s*$/i.test(labels[i].textContent)) {
-        var v = labels[i].nextElementSibling;
-        var t = v ? v.textContent : (labels[i].nextSibling ? labels[i].nextSibling.textContent : '');
-        return semDoc(cortarRotulos(t));
+        // o valor pode ser um texto solto logo depois do r\u00f3tulo, ou o pr\u00f3ximo elemento
+        var t = '', ns = labels[i].nextSibling, ne = labels[i].nextElementSibling;
+        if (ns && ns.nodeType === 3 && clean(ns.nodeValue)) t = ns.nodeValue;
+        else if (ne && !/:\s*$/.test(clean(ne.textContent))) t = ne.textContent;
+        var nm = semDoc(cortarRotulos(t));
+        if (nm) return nm;
+        break;                                   // estrutura inesperada: tenta pelo texto
       }
     }
     var m = clean(cel.textContent).match(/nome( do cliente)?\s*:\s*(.*)$/i);
@@ -1262,6 +1266,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       }
       buckets[col].push(it);
     });
+    // Lista filtrada no Zeev (ex.: s\u00f3 a T01): se TODOS os carregados ca\u00edram numa \u00fanica coluna,
+    // o total informado pelo Zeev \u00e9 o total dessa coluna. S\u00f3 vale sem busca/filtro do Kanban.
+    var totalLista = totalZeev();
+    var comItens = cols.filter(function (c) { return buckets[c.id].length; });
+    var colTotal = (totalLista && totalLista > todos.length && !q && !stInst.ator && !foraDaArea &&
+                    comItens.length === 1 && buckets[comItens[0].id].length === todos.length) ? comItens[0].id : '';
+
     var frag = document.createDocumentFragment();
     cols.forEach(function (c) {
       var list = buckets[c.id];
@@ -1270,9 +1281,15 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var head = el('header', 'lcbk-head');
       var h = el('div');
       h.appendChild(el('h3', null, c.name));
-      if (c.dica) h.appendChild(el('small', null, c.dica));
+      var n = list.length;
+      if (c.id === colTotal) {
+        n = totalLista;
+        h.appendChild(el('small', null, 'Total da lista filtrada no Zeev (' + list.length + ' nesta p\u00e1gina)'));
+      } else if (c.dica) {
+        h.appendChild(el('small', null, c.dica));
+      }
       head.appendChild(h);
-      head.appendChild(el('span', 'lcbk-count', String(list.length)));
+      head.appendChild(el('span', 'lcbk-count', fmtN(n)));
       sec.appendChild(head);
       var body = el('div', 'lcbk-list');
       if (!list.length) body.appendChild(el('p', 'lcbk-empty', q ? 'Nada com esse filtro' : 'Nada aqui'));
@@ -1319,7 +1336,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var parcial = total && total > todos.length;
     uiI.aviso.textContent = parcial ? 'Mostrando ' + todos.length + ' de ' + fmtN(total) +
       '. As colunas e a contagem por pessoa consideram s\u00f3 os carregados. Para o n\u00famero exato de uma pessoa, use Filtrar do Zeev pelo respons\u00e1vel: o total "inst\u00e2ncia(s) encontrada(s)" passa a ser o dela.' : '';
-    uiI.aviso.style.display = parcial && stInst.view === 'kanban' ? '' : 'none';
+    uiI.aviso.style.display = parcial && !colTotal && stInst.view === 'kanban' ? '' : 'none';
     uiI.status.textContent = (total ? todos.length + ' de ' + fmtN(total) : todos.length + ' nesta p\u00e1gina') +
       (stInst.ator ? ' | filtrando: ' + stInst.ator + ' (' + itens.length + ')' : '') +
       (foraDaArea ? ' | ' + foraDaArea + ' em outras \u00e1reas' : '') +
