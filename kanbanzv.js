@@ -214,6 +214,7 @@
 
   // \u2550\u2550\u2550 UTILIT\u00c1RIOS \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
   var DIA = 86400000;
+function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function clean(s) { return (s == null ? '' : String(s)).replace(/\s+/g, ' ').trim(); }
   function lower(s) { return clean(s).toLowerCase(); }
   function txt(el) { return el ? clean(el.textContent) : ''; }
@@ -242,11 +243,22 @@
     return out.filter(Boolean);
   }
   // Segunda prote\u00e7\u00e3o: nada com cara de CPF/CNPJ chega ao card.
+  // R\u00f3tulos que podem vir colados no texto do resumo do Zeev. Tudo a partir do primeiro
+  // deles \u00e9 descartado: o card s\u00f3 mostra o nome.
+  var ROTULOS = /(cpf|cnpj|rg|telefone|celular|whats\w*|e-?mail|p[a\u00e1]gina de origem|processo|n[u\u00fa]mero do processo|ativo|viabilidade|desqualifica\w*|valor\w*|etapa\w*|oab|endere[c\u00e7]o)\s*(do cliente\s*)?:/i;
+  function cortarRotulos(t) {
+    var m = String(t || '').search(ROTULOS);
+    return m === -1 ? String(t || '') : String(t).slice(0, m);
+  }
+  // Segunda prote\u00e7\u00e3o: nada com cara de CPF, CNPJ, telefone ou e-mail chega ao card,
+  // mesmo colado em outras palavras.
   function semDoc(t) {
     return clean(String(t || '')
-      .replace(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g, '')
-      .replace(/\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g, '')
-      .replace(/\b(cpf|cnpj)\s*:?\s*$/i, ''));
+      .replace(/[^\s@]+@[^\s@]+\.[^\s@]+/g, '')
+      .replace(/(^|\D)\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}(?!\d)/g, '$1')
+      .replace(/(^|\D)\d{3}\.?\d{3}\.?\d{3}-?\d{2}(?!\d)/g, '$1')
+      .replace(/\(?\b\d{2}\)?\s*9?\d{4}[-\s]?\d{4}(?!\d)/g, '')
+      .replace(/(cpf|cnpj|telefone|celular)\s*:?\s*$/i, ''));
   }
   function sameOrigin(href) {
     try {
@@ -776,6 +788,11 @@
       buckets[col].push(it);
     });
 
+    // Total de tarefas que o Zeev informa ("Pendentes (60 de 7513)"): a p\u00e1gina traz s\u00f3 uma parte.
+    var totT = totalZeev();
+    var parcialT = !!(totT && totT > tarefas.length);
+    var backlogTotal = layoutId === 'negociacao' || layoutId === 'triagem';   // Backlog = todas as tarefas da pessoa
+
     var frag = document.createDocumentFragment();
     cols.forEach(function (c) {
       var list = buckets[c.id];
@@ -784,9 +801,16 @@
       var head = el('header', 'lcbk-head');
       var h = el('div');
       h.appendChild(el('h3', null, c.name));
-      if (c.dica) h.appendChild(el('small', null, c.dica));
+      var n = list.length;
+      if (c.id === 'backlog' && backlogTotal && parcialT && !q) {
+        var ext = list.filter(function (x) { return x.kind !== 'tarefa'; }).length;
+        n = totT + ext;
+        h.appendChild(el('small', null, list.length + ' nesta p\u00e1gina'));
+      } else if (c.dica) {
+        h.appendChild(el('small', null, c.dica));
+      }
       head.appendChild(h);
-      head.appendChild(el('span', 'lcbk-count', String(list.length)));
+      head.appendChild(el('span', 'lcbk-count', fmtN(n)));
       sec.appendChild(head);
       var body = el('div', 'lcbk-list');
       if (c.precisaB && B.status !== 'ok') body.appendChild(avisoB());
@@ -803,6 +827,11 @@
 
     var st = B.status === 'ok' ? 'Leads atualizados \u00e0s ' + B.em.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) :
       B.status === 'carregando' ? 'Carregando leads...' : B.status === 'erro' ? 'Falha ao carregar leads' : '';
+    if (parcialT) st = tarefas.length + ' de ' + fmtN(totT) + ' tarefas nesta p\u00e1gina' + (st ? ' | ' + st : '');
+    var mostrarAviso = parcialT && !backlogTotal && state.view === 'kanban';
+    ui.aviso.textContent = mostrarAviso ? 'Mostrando ' + tarefas.length + ' de ' + fmtN(totT) +
+      ' tarefas. As colunas contam s\u00f3 as desta p\u00e1gina: use o Filtrar do Zeev para ver o n\u00famero exato de um recorte.' : '';
+    ui.aviso.style.display = mostrarAviso ? '' : 'none';
     ui.status.textContent = st + (ocultos ? (st ? ' | ' : '') + ocultos + ' oculto(s) pelo filtro' : '');
     document.documentElement.classList.toggle('lcbk-on', state.view === 'kanban');
     syncBar();
@@ -899,6 +928,7 @@
       '.lcbk-pessoa:focus-visible{outline:2px solid #3b6fd8;outline-offset:2px}',
       '.lcbk-owner{color:#1b2f5c;font-weight:600}',
       '.lcbk-atv{color:#404857;font-weight:500}',
+      '.lcbk-aviso{margin:0 0 10px;padding:8px 12px;border-radius:8px;background:#fff7e6;color:#7a4a00;font-size:12.5px}',
       '.lcbk-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#404857;cursor:pointer}',
       '.lcbk-chip.is-area{background:#f1f2f5;color:#404857}',
       '@media (max-width:768px){.lcbk-on .lcbk-board{grid-template-columns:repeat(var(--lcbk-cols,4),82vw)}.lcbk-status{margin-left:0}}',
@@ -962,8 +992,12 @@
     ui.bar.appendChild(ui.tools);
 
     ui.resumo = el('div');
+    ui.aviso = el('p', 'lcbk-aviso');
+    ui.aviso.setAttribute('role', 'status');
+    ui.aviso.style.display = 'none';
     ui.board = el('div', 'lcbk-board');
     table.parentNode.insertBefore(ui.bar, table);
+    table.parentNode.insertBefore(ui.aviso, table);
     table.parentNode.insertBefore(ui.resumo, table);
     table.parentNode.insertBefore(ui.board, table.nextSibling);
   }
@@ -983,7 +1017,7 @@
     new MutationObserver(function (recs) {
       for (var i = 0; i < recs.length; i++) {
         var t = recs[i].target;
-        if (!ui.board.contains(t) && !ui.bar.contains(t) && !ui.resumo.contains(t)) { schedule(); return; }
+        if (!ui.board.contains(t) && !ui.bar.contains(t) && !ui.resumo.contains(t) && !ui.aviso.contains(t)) { schedule(); return; }
       }
     }).observe(root, { childList: true, subtree: true, characterData: true });
     render();
@@ -1038,6 +1072,27 @@
     return melhor;
   }
 
+  function nomeDaCelula(cel) {
+    if (!cel) return '';
+    var labels = cel.querySelectorAll('[class*="label"], b, strong, dt');
+    for (var i = 0; i < labels.length; i++) {
+      if (/^\s*nome( do cliente)?\s*:?\s*$/i.test(labels[i].textContent)) {
+        var v = labels[i].nextElementSibling;
+        var t = v ? v.textContent : (labels[i].nextSibling ? labels[i].nextSibling.textContent : '');
+        return semDoc(cortarRotulos(t));
+      }
+    }
+    var m = clean(cel.textContent).match(/nome( do cliente)?\s*:\s*(.*)$/i);
+    return m ? semDoc(cortarRotulos(m[2])) : '';
+  }
+
+  // Total que o pr\u00f3prio Zeev informa ("213 inst\u00e2ncia(s) encontrada(s)" / "Pendentes (20 de 7513)")
+  function totalZeev() {
+    var t = document.body.textContent;
+    var m = t.match(/([\d.]+)\s*inst[a\u00e2]ncia\(s\)\s*encontrada/i) || t.match(/pendentes\s*\(\s*\d+\s*de\s*([\d.]+)\s*\)/i);
+    return m ? parseInt(m[1].replace(/\./g, ''), 10) : null;
+  }
+
   function lerInstancias() {
     var t = tabelaInst();
     if (!t) return [];
@@ -1048,13 +1103,8 @@
       var cAtv = tr.querySelector(S.atual);
       var cSt = tr.querySelector(S.status);
       var linhas = linhasDe(cSol);
-      var nome = '';
-      linhas.some(function (l) {
-        var m = l.match(/^nome(?: do cliente)?\s*:\s*(.+)$/i);
-        if (m) { nome = m[1]; return true; }
-        return false;
-      });
-      var processo = linhas[0] || '';
+      var nome = nomeDaCelula(cSol);
+      var processo = semDoc(cortarRotulos(String(linhas[0] || '').replace(/nome( do cliente)?\s*:.*$/i, '')));
       var atividade = cAtv ? (txt(cAtv.querySelector(S.atividade)) || firstLine(cAtv)) : '';
       var resp = cAtv ? txt(cAtv.querySelector(S.responsavel)) : '';
       var prazoEl = cAtv && cAtv.querySelector(S.prazo);
@@ -1172,6 +1222,7 @@
     view: ls(CFG.keys.viewInst) || 'kanban',
     layout: LAYOUTS_INST[ls(CFG.keys.layoutInst)] ? ls(CFG.keys.layoutInst) : '',   // vazio = autom\u00e1tico
     outras: ls('lcbKanbanOutras') === '1',
+    ator: '',
     busca: ''
   };
   var uiI = {};
@@ -1184,7 +1235,18 @@
 
   function renderInst() {
     if (!uiI.board) return;
-    var itens = lerInstancias();
+    var todos = lerInstancias();
+    var chaveAtor = function (it) { return it.ativo && it.quem ? (it.fila ? 'Grupo: ' : '') + it.quem : ''; };
+    var atores = {};
+    todos.forEach(function (it) {
+      var k = chaveAtor(it);
+      if (!k) return;
+      var a = atores[k] || (atores[k] = { k: k, total: 0, atrasados: 0 });
+      a.total++;
+      if (it.late) a.atrasados++;
+    });
+    if (stInst.ator && !atores[stInst.ator]) stInst.ator = '';
+    var itens = stInst.ator ? todos.filter(function (it) { return chaveAtor(it) === stInst.ator; }) : todos;
     var layoutId = layoutInstAtivo();
     var L = LAYOUTS_INST[layoutId];
     var foraDaArea = 0;
@@ -1225,7 +1287,41 @@
     });
     uiI.board.replaceChildren(frag);
     uiI.board.style.setProperty('--lcbk-cols', String(uiI.board.children.length));
-    uiI.status.textContent = itens.length + ' nesta p\u00e1gina' +
+
+    // Filtro e resumo por ator (quem est\u00e1 com a atividade atual)
+    var lista = Object.keys(atores).map(function (k) { return atores[k]; })
+      .sort(function (a, b) { return b.total - a.total || a.k.localeCompare(b.k); });
+    uiI.fAtor.replaceChildren(el('option', null, 'Com quem: todos'));
+    uiI.fAtor.options[0].value = '';
+    lista.forEach(function (a) {
+      var o = el('option', null, a.k + ' (' + a.total + ')');
+      o.value = a.k;
+      uiI.fAtor.appendChild(o);
+    });
+    uiI.fAtor.value = stInst.ator;
+    var box = el('div', 'lcbk-resumo');
+    box.setAttribute('role', 'group');
+    box.setAttribute('aria-label', 'Quantos est\u00e3o com cada pessoa');
+    lista.slice(0, 30).forEach(function (a) {
+      var b = el('button', 'lcbk-pessoa' + (stInst.ator === a.k ? ' is-on' : ''));
+      b.type = 'button';
+      b.setAttribute('aria-pressed', stInst.ator === a.k ? 'true' : 'false');
+      b.appendChild(el('strong', null, a.k));
+      b.appendChild(el('span', null, a.total + (a.total === 1 ? ' processo' : ' processos')));
+      if (a.atrasados) b.appendChild(el('span', 'is-stuck', a.atrasados + (a.atrasados === 1 ? ' atrasado' : ' atrasados')));
+      b.addEventListener('click', function () { stInst.ator = stInst.ator === a.k ? '' : a.k; renderInst(); });
+      box.appendChild(b);
+    });
+    uiI.resumo.replaceChildren(box);
+    uiI.resumo.style.display = stInst.view === 'kanban' && lista.length ? '' : 'none';
+
+    var total = totalZeev();
+    var parcial = total && total > todos.length;
+    uiI.aviso.textContent = parcial ? 'Mostrando ' + todos.length + ' de ' + fmtN(total) +
+      '. As colunas e a contagem por pessoa consideram s\u00f3 os carregados. Para o n\u00famero exato de uma pessoa, use Filtrar do Zeev pelo respons\u00e1vel: o total "inst\u00e2ncia(s) encontrada(s)" passa a ser o dela.' : '';
+    uiI.aviso.style.display = parcial && stInst.view === 'kanban' ? '' : 'none';
+    uiI.status.textContent = (total ? todos.length + ' de ' + fmtN(total) : todos.length + ' nesta p\u00e1gina') +
+      (stInst.ator ? ' | filtrando: ' + stInst.ator + ' (' + itens.length + ')' : '') +
       (foraDaArea ? ' | ' + foraDaArea + ' em outras \u00e1reas' : '') +
       (ocultos ? ' | ' + ocultos + ' oculto(s) pela busca' : '');
     document.documentElement.classList.toggle('lcbk-on', stInst.view === 'kanban');
@@ -1273,6 +1369,10 @@
       renderInst();
     });
     uiI.tools.appendChild(uiI.layout);
+    uiI.fAtor = el('select', 'lcbk-select');
+    uiI.fAtor.setAttribute('aria-label', 'Filtrar por quem est\u00e1 com a atividade');
+    uiI.fAtor.addEventListener('change', function () { stInst.ator = uiI.fAtor.value; renderInst(); });
+    uiI.tools.appendChild(uiI.fAtor);
     var lbl = el('label', 'lcbk-check');
     uiI.outras = el('input');
     uiI.outras.type = 'checkbox';
@@ -1298,8 +1398,13 @@
     uiI.status.setAttribute('aria-live', 'polite');
     uiI.tools.appendChild(uiI.status);
     uiI.bar.appendChild(uiI.tools);
+    uiI.aviso = el('p', 'lcbk-aviso');
+    uiI.aviso.setAttribute('role', 'status');
+    uiI.resumo = el('div');
     uiI.board = el('div', 'lcbk-board');
     container.parentNode.insertBefore(uiI.bar, container);
+    container.parentNode.insertBefore(uiI.aviso, container);
+    container.parentNode.insertBefore(uiI.resumo, container);
     container.parentNode.insertBefore(uiI.board, container.nextSibling);
   }
 
@@ -1316,7 +1421,7 @@
     new MutationObserver(function (recs) {
       for (var i = 0; i < recs.length; i++) {
         var x = recs[i].target;
-        if (!uiI.board.contains(x) && !uiI.bar.contains(x)) {
+        if (!uiI.board.contains(x) && !uiI.bar.contains(x) && !uiI.resumo.contains(x) && !uiI.aviso.contains(x)) {
           clearTimeout(timerI);
           timerI = setTimeout(renderInst, 150);
           return;
