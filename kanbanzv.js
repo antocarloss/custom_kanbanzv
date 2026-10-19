@@ -176,6 +176,11 @@
       cessao: 'Cess\u00e3o & Protocolo', pos: 'P\u00f3s-cess\u00e3o', triagem: 'Triagem', acompanhar: 'Acompanhar lead',
       ppf: 'PPF (proposta futura)', ppp: 'PPP (negociar compra)', outros: 'Outra etapa'
     },
+    // Filas de grupo: o Zeev s\u00f3 informa o 1\u00ba nome e "+N". Para as filas conhecidas,
+    // o Kanban mostra o nome da fila e quem faz parte dela. [fluxo, c\u00f3digo da atividade, nome, membros]
+    filas: [
+      ['pai', 'T01', 'Fila da triagem', 'Ingrid, Wagner, R\u00e9gis, Gabriel']
+    ],
     nomesArea: { comercial: 'Comercial', financeiro: 'Financeiro', juridico: 'Jur\u00eddico', conselho: 'Conselho', triagem: 'Triagem' },
     // Esteiras por time. Coluna = [id, nome, \u00e1reas, etapas] ('*' = qualquer).
     esteiras: {
@@ -1035,6 +1040,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-resumo{display:flex;gap:8px;overflow-x:auto;padding:0 0 12px}',
       '.lcbk-pessoa{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:150px;text-align:left;border:1px solid #d9dce3;border-radius:8px;background:#fff;padding:8px 12px;font-family:inherit;font-size:12px;color:#5e6c84;cursor:pointer}',
       '.lcbk-pessoa strong{font-size:13px;color:#172b4d}',
+      '.lcbk-time{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#6a3fb5}',
       '.lcbk-pessoa .is-stuck{color:#b45f0e;font-weight:600}',
       '.lcbk-pessoa .is-you{color:#3b6fd8}',
       '.lcbk-pessoa.is-on{border-color:#1b2f5c;box-shadow:inset 0 0 0 1px #1b2f5c}',
@@ -1222,7 +1228,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
 
   // Total que o pr\u00f3prio Zeev informa ("213 inst\u00e2ncia(s) encontrada(s)" / "Pendentes (20 de 7513)")
   function totalZeev() {
-    // só texto visível da página: ignora <script>/<style>, que podem conter os mesmos modelos de frase
+    // s\u00f3 texto vis\u00edvel da p\u00e1gina: ignora <script>/<style>, que podem conter os mesmos modelos de frase
     var partes = [], w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
       acceptNode: function (n) {
         var p = n.parentNode;
@@ -1269,6 +1275,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         atividade: ativo ? atividade : '',
         quem: ativo ? resp.replace(/,\s*\+\d+\s*$/, '') : '',
         fila: ativo && /,\s*\+\d+\s*$/.test(resp),
+        mais: (resp.match(/,\s*\+(\d+)\s*$/) || [0, 0])[1] * 1,
         prazoTxt: prazoTxt, due: due, late: late,
         today: !late && !!(due && due.date && due.date.toDateString() === now.toDateString()),
         ativo: ativo, status: status,
@@ -1365,6 +1372,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var cnt = parseInt(rawCnt.replace(/\D/g, ''), 10) || 0;
     var respTxt = textoDeHtml(x.taskresponsible);
     var fila = ativo && (/\+/.test(rawCnt) ? cnt > 0 : cnt > 1 || /,\s*\+\d+\s*$/.test(respTxt));
+    var maisTxt = (respTxt.match(/,\s*\+(\d+)\s*$/) || [0, 0])[1] * 1;
+    var mais = fila ? (maisTxt || (/\+/.test(rawCnt) ? cnt : Math.max(cnt - 1, 0))) : 0;
     var late = ativo && (/danger/i.test(String(x.taskslaclass || '')) || !!(due && due.date && due.date < now));
     var tipo = tipoDe(processo);
     var cl = classificar(tipo, atividade);
@@ -1375,7 +1384,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       processo: nome ? processo : '',
       atividade: ativo ? atividade : '',
       quem: ativo ? semDoc(respTxt.replace(/,\s*\+\d+\s*$/, '')) : '',
-      fila: fila, prazoTxt: ativo ? prazoTxt : '', due: due, late: late,
+      fila: fila, mais: mais, prazoTxt: ativo ? prazoTxt : '', due: due, late: late,
       today: !late && !!(due && due.date && due.date.toDateString() === now.toDateString()),
       ativo: ativo, status: status, fimEm: toDate(textoDeHtml(x.enddate)),
       tipo: tipo, stage: cl.etapa, area: cl.area
@@ -1440,6 +1449,27 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     return LC.completo && LC.completo.base === LC.base ? LC.completo.itens.slice() : lerInstancias();
   }
 
+  // "Fila da triagem: Ingrid, Wagner, R\u00e9gis, Gabriel" para filas conhecidas;
+  // sen\u00e3o "Fila: <1\u00ba nome> e mais N" (o Zeev n\u00e3o informa os outros nomes).
+  // Time de cada processo, pela \u00e1rea da atividade atual. Encerrados n\u00e3o t\u00eam atividade:
+  // os do Pai/Relacionamento contam na Triagem; os do Filho, em Comercial e Jur\u00eddico.
+  var NOMES_TIME = { triagem: 'Triagem', comercial: 'Comercial', juridico: 'Jur\u00eddico' };
+  var AREA_TIME = { triagem: 'triagem', comercial: 'comercial', financeiro: 'comercial',
+                    juridico: 'juridico', conselho: 'juridico' };
+  function timeDe(it) {
+    if (it.ativo) return AREA_TIME[it.area] || (it.tipo !== 'filho' ? 'triagem' : '');
+    return it.tipo === 'filho' ? 'filho' : 'triagem';
+  }
+
+  function rotuloFila(it) {
+    var cod = codigoDe(it.atividade);
+    for (var i = 0; i < CFG.filas.length; i++) {
+      var f = CFG.filas[i];
+      if (f[0] === it.tipo && f[1] === cod) return f[2] + ': ' + f[3];
+    }
+    return 'Fila: ' + it.quem + (it.mais ? ' e mais ' + it.mais : '');
+  }
+
   function cardInst(it, layoutId) {
     var c = el('article', 'lcbk-card' + (it.late ? ' is-late' : it.today ? ' is-today' : '') +
       (!it.ativo ? ' is-done' : ''));
@@ -1473,7 +1503,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var foot = el('div', 'lcbk-foot');
     if (it.ativo) {
       if (it.prazoTxt) foot.appendChild(el('span', 'lcbk-due', 'Prazo: ' + it.prazoTxt));
-      if (it.quem) foot.appendChild(el('span', 'lcbk-who', (it.fila ? 'Grupo: ' : 'Com ') + it.quem));
+      if (it.quem) foot.appendChild(el('span', 'lcbk-who', it.fila ? rotuloFila(it) : 'Com ' + it.quem));
     } else if (it.fimEm) {
       foot.appendChild(el('span', 'lcbk-due', 'Encerrada em ' + fmtData(it.fimEm)));
     }
@@ -1486,6 +1516,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     layout: LAYOUTS_INST[ls(CFG.keys.layoutInst)] ? ls(CFG.keys.layoutInst) : '',   // vazio = autom\u00e1tico
     outras: ls('lcbKanbanOutras') === '1',
     ator: '',
+    time: ['triagem', 'comercial', 'juridico'].indexOf(ls('lcbKanbanTime')) !== -1 ? ls('lcbKanbanTime') : '',
     totalConfirmado: '',
     busca: ''
   };
@@ -1505,19 +1536,25 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var L = LAYOUTS_INST[layoutId];
     // O resumo por pessoa e o filtro "Com quem" seguem a esteira escolhida: na Esteira jur\u00eddica,
     // s\u00f3 entram processos em etapas do jur\u00eddico (a menos que "Mostrar outras \u00e1reas" esteja marcado).
-    var foraDaArea = 0;
+    var foraDaArea = 0, foraDoTime = 0;
     var todos = lidos.filter(function (it) {
       if (L.esteira && !stInst.outras && L.place(it) === 'outros') { foraDaArea++; return false; }
+      if (stInst.time && timeDe(it) !== stInst.time && !(timeDe(it) === 'filho' && stInst.time !== 'triagem')) {
+        foraDoTime++;
+        return false;
+      }
       return true;
     });
-    var chaveAtor = function (it) { return it.ativo && it.quem ? (it.fila ? 'Grupo: ' : '') + it.quem : ''; };
+    var chaveAtor = function (it) { return it.ativo && it.quem ? (it.fila ? rotuloFila(it) : it.quem) : ''; };
     var atores = {};
     todos.forEach(function (it) {
       var k = chaveAtor(it);
       if (!k) return;
-      var a = atores[k] || (atores[k] = { k: k, total: 0, atrasados: 0 });
+      var a = atores[k] || (atores[k] = { k: k, total: 0, atrasados: 0, times: {} });
       a.total++;
       if (it.late) a.atrasados++;
+      var tm = timeDe(it);
+      a.times[tm] = (a.times[tm] || 0) + 1;
     });
     if (stInst.ator && !atores[stInst.ator]) stInst.ator = '';
     var itens = stInst.ator ? todos.filter(function (it) { return chaveAtor(it) === stInst.ator; }) : todos;
@@ -1589,21 +1626,37 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     // Filtro e resumo por ator (quem est\u00e1 com a atividade atual)
     var lista = Object.keys(atores).map(function (k) { return atores[k]; })
       .sort(function (a, b) { return b.total - a.total || a.k.localeCompare(b.k); });
+    var ORDEM_TIME = { triagem: 0, comercial: 1, juridico: 2, '': 3 };
+    lista.forEach(function (a) {                 // time principal de cada pessoa
+      var melhor = '', max = 0;
+      Object.keys(a.times).forEach(function (t) { if (a.times[t] > max) { max = a.times[t]; melhor = t; } });
+      a.time = NOMES_TIME[melhor] ? melhor : '';
+    });
     uiI.fAtor.replaceChildren(el('option', null, 'Com quem: todos'));
     uiI.fAtor.options[0].value = '';
-    lista.forEach(function (a) {
-      var o = el('option', null, a.k + ' (' + a.total + ')');
-      o.value = a.k;
-      uiI.fAtor.appendChild(o);
+    ['triagem', 'comercial', 'juridico', ''].forEach(function (t) {
+      var doTime = lista.filter(function (a) { return a.time === t; });
+      if (!doTime.length) return;
+      var g = el('optgroup');
+      g.label = NOMES_TIME[t] || 'Outros';
+      doTime.forEach(function (a) {
+        var o = el('option', null, a.k + ' (' + a.total + ')');
+        o.value = a.k;
+        g.appendChild(o);
+      });
+      uiI.fAtor.appendChild(g);
     });
     uiI.fAtor.value = stInst.ator;
+    uiI.fTime.value = stInst.time;
     var box = el('div', 'lcbk-resumo');
     box.setAttribute('role', 'group');
     box.setAttribute('aria-label', 'Quantos est\u00e3o com cada pessoa');
-    lista.slice(0, 30).forEach(function (a) {
+    lista.slice().sort(function (a, b) { return ORDEM_TIME[a.time] - ORDEM_TIME[b.time] || b.total - a.total; })
+      .slice(0, 40).forEach(function (a) {
       var b = el('button', 'lcbk-pessoa' + (stInst.ator === a.k ? ' is-on' : ''));
       b.type = 'button';
       b.setAttribute('aria-pressed', stInst.ator === a.k ? 'true' : 'false');
+      if (a.time) b.appendChild(el('span', 'lcbk-time', NOMES_TIME[a.time]));
       b.appendChild(el('strong', null, a.k));
       b.appendChild(el('span', null, a.total + (a.total === 1 ? ' processo' : ' processos')));
       if (a.atrasados) b.appendChild(el('span', 'is-stuck', a.atrasados + (a.atrasados === 1 ? ' atrasado' : ' atrasados')));
@@ -1642,6 +1695,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     uiI.status.textContent = origem +
       (stInst.ator ? ' | filtrando: ' + stInst.ator + ' (' + itens.length + ')' : '') +
       (foraDaArea ? ' | ' + foraDaArea + ' em outras \u00e1reas' : '') +
+      (foraDoTime ? ' | ' + foraDoTime + ' de outros times' : '') +
       (ocultos ? ' | ' + ocultos + ' oculto(s) pela busca' : '');
     document.documentElement.classList.toggle('lcbk-on', stInst.view === 'kanban');
     $$('.lcbk-seg', uiI.bar).forEach(function (b) {
@@ -1691,6 +1745,18 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     uiI.fAtor = el('select', 'lcbk-select');
     uiI.fAtor.setAttribute('aria-label', 'Filtrar por quem est\u00e1 com a atividade');
     uiI.fAtor.addEventListener('change', function () { stInst.ator = uiI.fAtor.value; renderInst(); });
+    uiI.fTime = el('select', 'lcbk-select');
+    uiI.fTime.setAttribute('aria-label', 'Filtrar por time');
+    [['', 'Time: todos'], ['triagem', 'Triagem'], ['comercial', 'Comercial'], ['juridico', 'Jur\u00eddico']].forEach(function (t) {
+      var o = el('option', null, t[1]); o.value = t[0]; uiI.fTime.appendChild(o);
+    });
+    uiI.fTime.addEventListener('change', function () {
+      stInst.time = uiI.fTime.value;
+      stInst.ator = '';
+      ls('lcbKanbanTime', stInst.time);
+      renderInst();
+    });
+    uiI.tools.appendChild(uiI.fTime);
     uiI.tools.appendChild(uiI.fAtor);
     var lbl = el('label', 'lcbk-check');
     uiI.outras = el('input');
