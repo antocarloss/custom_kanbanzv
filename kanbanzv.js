@@ -20,6 +20,13 @@
     // Acompanhar solicita\u00e7\u00f5es / Monitorar: qualquer p\u00e1gina /my/... ou /report/... que tenha a
     // tabela de inst\u00e2ncias. A detec\u00e7\u00e3o final \u00e9 pelo HTML (td.instance-cell).
     pathInstancias: /^\/(my|report)\//,
+    // Lista completa: o script repete a MESMA consulta que a tela fez (mesmos filtros),
+    // p\u00e1gina por p\u00e1gina. S\u00f3 GET no pr\u00f3prio Zeev, com a sess\u00e3o da pessoa.
+    lista: {
+      padrao: /\/api\/internal\/bpms\/[\d.]+\/instances\?/i,
+      autoAte: 600,      // carrega sozinho quando a lista filtrada tem at\u00e9 isso
+      maxItens: 3000     // nunca passa disso (protege o Zeev); acima, pede para filtrar
+    },
     inst: {
       cell: 'td.instance-cell',
       numero: '.instance-cell--number',
@@ -32,7 +39,7 @@
       prazo: '.instance-summary-count',
       acao: '.instance-cell--action'
     },
-    pilot: true,                         // true = s\u00f3 liga com localStorage.lcbKanban = 'on'
+    pilot: false,                        // true = s\u00f3 liga com localStorage.lcbKanban = 'on'
     keys: { flag: 'lcbKanban', view: 'lcbKanbanView', layout: 'lcbKanbanLayout',
             viewInst: 'lcbKanbanViewInst', layoutInst: 'lcbKanbanLayoutInst' },
 
@@ -690,9 +697,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
 
   function abrirTarefa(t) {
-    if (t.link) t.link.click();
-    else if (t.taskCell) t.taskCell.click();
-    else if (t.tr) t.tr.click();
+    if (t.tr && document.contains(t.tr)) {
+      if (t.link) t.link.click();
+      else if (t.taskCell) t.taskCell.click();
+      else t.tr.click();
+    } else if (t.href) {
+      location.assign(t.href);
+    }
   }
 
   function card(it, layoutId) {
@@ -845,7 +856,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
 
   function render() {
     if (!ui.board) return;
-    var tarefas = lerTarefas();
+    var completoT = !!(LT.completo && LT.completo.base === LT.base);
+    var tarefas = completoT ? LT.completo.itens.slice() : lerTarefas();
     state.area = detectarArea(tarefas);
     var numsComigo = {};
     tarefas.forEach(function (t) { if (t.num) numsComigo[t.num] = true; });
@@ -868,9 +880,14 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     });
 
     // Total de tarefas que o Zeev informa ("Pendentes (60 de 7513)"): a p\u00e1gina traz s\u00f3 uma parte.
-    var totT = totalZeev();
-    var parcialT = !!(totT && totT > tarefas.length);
+    // Contagem oficial do Zeev (count-filtered) quando dispon\u00edvel; sen\u00e3o, o texto "Pendentes (x de N)".
+    var cont = LT.cont && LT.cont.base === LT.base ? LT.cont : null;
+    var totT = cont ? cont.filtered : totalZeev();
+    var limitadoT = completoT && LT.completo.limitado;
+    var parcialT = !!(totT && totT > tarefas.length && !(completoT && !limitadoT));
     var backlogTotal = layoutId === 'negociacao' || layoutId === 'triagem';   // Backlog = todas as tarefas da pessoa
+    // Na disposi\u00e7\u00e3o Por status, Backlog = no prazo e Atrasadas = fora do prazo: a contagem do Zeev d\u00e1 os dois exatos.
+    var statusExato = layoutId === 'status' && cont && parcialT && !q;
 
     var frag = document.createDocumentFragment();
     cols.forEach(function (c) {
@@ -881,10 +898,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var h = el('div');
       h.appendChild(el('h3', null, c.name));
       var n = list.length;
+      var extN = list.filter(function (x) { return x.kind !== 'tarefa'; }).length;
       if (c.id === 'backlog' && backlogTotal && parcialT && !q) {
-        var ext = list.filter(function (x) { return x.kind !== 'tarefa'; }).length;
-        n = totT + ext;
+        n = totT + extN;
         h.appendChild(el('small', null, list.length + ' nesta p\u00e1gina'));
+      } else if (statusExato && (c.id === 'backlog' || c.id === 'atrasadas')) {
+        n = (c.id === 'backlog' ? cont.ontime : cont.filtered - cont.ontime) + extN;
+        h.appendChild(el('small', null, 'Total do Zeev (' + list.length + ' nesta p\u00e1gina)'));
       } else if (c.dica) {
         h.appendChild(el('small', null, c.dica));
       }
@@ -906,11 +926,25 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
 
     var st = B.status === 'ok' ? 'Leads atualizados \u00e0s ' + B.em.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) :
       B.status === 'carregando' ? 'Carregando leads...' : B.status === 'erro' ? 'Falha ao carregar leads' : '';
-    if (parcialT) st = tarefas.length + ' de ' + fmtN(totT) + ' tarefas nesta p\u00e1gina' + (st ? ' | ' + st : '');
-    var mostrarAviso = parcialT && !backlogTotal && state.view === 'kanban';
-    ui.aviso.textContent = mostrarAviso ? 'Mostrando ' + tarefas.length + ' de ' + fmtN(totT) +
-      ' tarefas. As colunas contam s\u00f3 as desta p\u00e1gina: use o Filtrar do Zeev para ver o n\u00famero exato de um recorte.' : '';
-    ui.aviso.style.display = mostrarAviso ? '' : 'none';
+    if (completoT) {
+      st = (limitadoT ? fmtN(tarefas.length) + ' de ' + fmtN(totT) + ' tarefas carregadas'
+                      : 'Todas as ' + fmtN(tarefas.length) + ' tarefas carregadas') +
+        ' \u00e0s ' + LT.completo.em.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + (st ? ' | ' + st : '');
+    } else if (parcialT) {
+      st = tarefas.length + ' de ' + fmtN(totT) + ' tarefas nesta p\u00e1gina' + (st ? ' | ' + st : '');
+    }
+    var mostrarAviso = (parcialT && !backlogTotal && !statusExato) || LT.erro || limitadoT;
+    ui.aviso.textContent = LT.erro ? 'Lista completa: ' + LT.erro + '. Mostrando s\u00f3 a p\u00e1gina atual.'
+      : limitadoT ? 'Carregadas as primeiras ' + fmtN(tarefas.length) + ' de ' + fmtN(totT) + ' tarefas (limite de ' +
+        fmtN(CFG.lista.maxItens) + ' para n\u00e3o pesar no Zeev). Filtre a lista para ter os n\u00fameros completos.'
+      : mostrarAviso ? 'Mostrando ' + tarefas.length + ' de ' + fmtN(totT) +
+        ' tarefas. As colunas contam s\u00f3 as desta p\u00e1gina: use "Carregar todas" ou o Filtrar do Zeev.' : '';
+    ui.aviso.style.display = mostrarAviso && state.view === 'kanban' ? '' : 'none';
+    var faltaT = !completoT && parcialT && LT.url;
+    ui.btnTudo.style.display = (faltaT || LT.carregando) && state.view === 'kanban' ? '' : 'none';
+    ui.btnTudo.textContent = LT.carregando ? LT.prog + ' (cancelar)' :
+      'Carregar todas (' + fmtN(Math.min(totT || 0, CFG.lista.maxItens)) + ')';
+    ui.btnAtual.style.display = completoT && !LT.carregando && state.view === 'kanban' ? '' : 'none';
     ui.status.textContent = st + (ocultos ? (st ? ' | ' : '') + ocultos + ' oculto(s) pelo filtro' : '');
     document.documentElement.classList.toggle('lcbk-on', state.view === 'kanban');
     syncBar();
@@ -1066,6 +1100,21 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     btn.addEventListener('click', buscar);
     if (CFG.acompanhamento.url) ui.tools.appendChild(btn);
 
+    ui.btnTudo = el('button', 'lcbk-btn');
+    ui.btnTudo.type = 'button';
+    ui.btnTudo.style.display = 'none';
+    ui.btnTudo.addEventListener('click', function () {
+      if (LT.carregando) { LT.cancelar = true; return; }
+      LT.erro = '';
+      carregarTarefas();
+    });
+    ui.tools.appendChild(ui.btnTudo);
+    ui.btnAtual = el('button', 'lcbk-btn', 'Atualizar');
+    ui.btnAtual.type = 'button';
+    ui.btnAtual.style.display = 'none';
+    ui.btnAtual.title = 'Buscar de novo todas as p\u00e1ginas';
+    ui.btnAtual.addEventListener('click', function () { LT.completo = null; LT.erro = ''; carregarTarefas(); });
+    ui.tools.appendChild(ui.btnAtual);
     ui.status = el('span', 'lcbk-status');
     ui.status.setAttribute('aria-live', 'polite');
     ui.tools.appendChild(ui.status);
@@ -1087,6 +1136,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function schedule() { clearTimeout(timer); timer = setTimeout(render, 150); }
 
   function boot(tries) {
+    if (tries === 0) vigiarConsultas();
     var table = document.querySelector(CFG.sel.table);
     var root = document.querySelector(CFG.sel.root) || (table && table.parentNode);
     if (!table || !root) {
@@ -1172,7 +1222,18 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
 
   // Total que o pr\u00f3prio Zeev informa ("213 inst\u00e2ncia(s) encontrada(s)" / "Pendentes (20 de 7513)")
   function totalZeev() {
-    var t = document.body.textContent;
+    // só texto visível da página: ignora <script>/<style>, que podem conter os mesmos modelos de frase
+    var partes = [], w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (n) {
+        var p = n.parentNode;
+        if (!p || /^(SCRIPT|STYLE|TEMPLATE|NOSCRIPT)$/.test(p.nodeName)) return NodeFilter.FILTER_REJECT;
+        if (ui.board && ui.board.contains(n)) return NodeFilter.FILTER_REJECT;
+        if (uiI.board && uiI.board.contains(n)) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    }), n;
+    while ((n = w.nextNode())) partes.push(n.nodeValue);
+    var t = partes.join(' ');
     var m = t.match(/([\d.]+)\s*inst[a\u00e2]ncia\(s\)\s*encontrada/i) || t.match(/pendentes\s*\(\s*\d+\s*de\s*([\d.]+)\s*\)/i);
     return m ? parseInt(m[1].replace(/\./g, ''), 10) : null;
   }
@@ -1229,7 +1290,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
                    { id: 'encerradas', name: 'Encerradas', ok: true }]);
       },
       place: function (it) {
-        if (!it.ativo) return 'encerradas';
+        // encerradas do Pai n\u00e3o interessam \u00e0s esteiras comercial e jur\u00eddica
+        if (!it.ativo) return id === 'triagem' || it.tipo === 'filho' ? 'encerradas' : 'outros';
         return colunaDe(id, it);
       }
     };
@@ -1257,8 +1319,125 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   };
 
   function abrirInstancia(it) {
-    var alvo = it.tr.querySelector('a[href]') || it.tr.querySelector(CFG.inst.acao) || it.tr;
-    alvo.click();
+    if (it.tr && document.contains(it.tr)) {
+      var alvo = it.tr.querySelector('a[href]') || it.tr.querySelector(CFG.inst.acao) || it.tr;
+      alvo.click();
+    } else if (it.href) {
+      location.assign(it.href);
+    }
+  }
+
+  // \u2550\u2550\u2550 LISTA COMPLETA (todas as p\u00e1ginas da consulta atual) \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+  var LC = { url: '', base: '', completo: null, carregando: false, cancelar: false, prog: '', erro: '' };
+  function baseDe(u) {
+    try { var x = new URL(u, location.origin); x.searchParams.delete('pagenumber'); return x.href; }
+    catch (e) { return ''; }
+  }
+  function registrarUrl(u) {
+    try {
+      var x = new URL(u, location.origin);
+      if (x.origin !== location.origin || !CFG.lista.padrao.test(x.pathname + x.search)) return;
+      var b = baseDe(x.href);
+      if (LC.carregando && b === LC.base) return;            // s\u00e3o as nossas pr\u00f3prias consultas
+      LC.url = x.href;
+      if (LC.completo && LC.completo.base !== b) { LC.completo = null; LC.erro = ''; }  // filtro mudou
+      LC.base = b;
+      agendarAuto();
+      if (uiI.board) { clearTimeout(timerI); timerI = setTimeout(renderInst, 150); }
+    } catch (e) { /* ignora */ }
+  }
+  function textoDeHtml(h) {
+    if (h == null) return '';
+    return clean(new DOMParser().parseFromString(String(h), 'text/html').body.textContent);
+  }
+  // Converte um item da API no mesmo formato dos cards. Do resumo, s\u00f3 o NOME \u00e9 aproveitado.
+  function daApi(x) {
+    var now = new Date();
+    var processo = semDoc(textoDeHtml(x.serviceorflowname));
+    var nome = '';
+    if (x.resume) nome = nomeDaCelula(new DOMParser().parseFromString(String(x.resume), 'text/html').body);
+    var atividade = semDoc(textoDeHtml(x.tasktitle));
+    var status = textoDeHtml(x.status);
+    var ativo = !status || /andamento/i.test(status);
+    var prazoTxt = clean([textoDeHtml(x.taskexpires), textoDeHtml(x.taskhrexpires)].filter(Boolean).join(' '));
+    var due = parsePrazoTexto(prazoTxt);
+    var rawCnt = String(x.taskcountresponsible || '');
+    var cnt = parseInt(rawCnt.replace(/\D/g, ''), 10) || 0;
+    var respTxt = textoDeHtml(x.taskresponsible);
+    var fila = ativo && (/\+/.test(rawCnt) ? cnt > 0 : cnt > 1 || /,\s*\+\d+\s*$/.test(respTxt));
+    var late = ativo && (/danger/i.test(String(x.taskslaclass || '')) || !!(due && due.date && due.date < now));
+    var tipo = tipoDe(processo);
+    var cl = classificar(tipo, atividade);
+    return {
+      kind: 'inst', tr: null, href: x.link ? sameOrigin(x.link) : null,
+      num: digits(x.c), numero: '#' + digits(x.c),
+      titulo: semDoc(nome || processo) || 'Solicita\u00e7\u00e3o',
+      processo: nome ? processo : '',
+      atividade: ativo ? atividade : '',
+      quem: ativo ? semDoc(respTxt.replace(/,\s*\+\d+\s*$/, '')) : '',
+      fila: fila, prazoTxt: ativo ? prazoTxt : '', due: due, late: late,
+      today: !late && !!(due && due.date && due.date.toDateString() === now.toDateString()),
+      ativo: ativo, status: status, fimEm: toDate(textoDeHtml(x.enddate)),
+      tipo: tipo, stage: cl.etapa, area: cl.area
+    };
+  }
+  function carregarTudo() {
+    if (LC.carregando || !LC.url) return;
+    var u = new URL(LC.url);
+    var base = baseDe(u.href);
+    var rpp = parseInt(u.searchParams.get('recordsperpage'), 10) || 60;
+    var total = totalZeev();
+    var alvo = Math.min(total || CFG.lista.maxItens, CFG.lista.maxItens);
+    var paginas = Math.max(1, Math.ceil(alvo / rpp));
+    var itens = [], vistos = {}, p = 1;
+    LC.carregando = true; LC.cancelar = false; LC.erro = ''; LC.base = base;
+    function fim(msgErro) {
+      LC.carregando = false; LC.prog = '';
+      if (msgErro) { LC.erro = msgErro; LC.completo = null; }
+      else if (!LC.cancelar) {
+        LC.completo = { base: base, itens: itens, em: new Date(),
+                        limitado: !!(total && total > CFG.lista.maxItens), total: total };
+      }
+      renderInst();
+    }
+    function proxima() {
+      if (LC.cancelar) return fim('');
+      if (p > paginas) return fim('');
+      LC.prog = 'Carregando ' + p + ' de ' + paginas + '\u2026';
+      renderInst();
+      u.searchParams.set('pagenumber', String(p));
+      fetch(u.href, { method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error',
+                      headers: cabecalhosApi() })
+        .then(function (r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          if (!/json/i.test(r.headers.get('content-type') || '')) throw new Error('resposta n\u00e3o veio em JSON');
+          return r.json();
+        })
+        .then(function (j) {
+          var sx = j && j.success;
+          var lote = (sx && sx.itens) || [];
+          lote.forEach(function (x) {
+            var it = daApi(x);
+            if (it.num && !vistos[it.num]) { vistos[it.num] = 1; itens.push(it); }
+          });
+          if (!sx || !sx.hasmoreitens || !lote.length) return fim('');
+          p++;
+          setTimeout(proxima, 150);                        // sem rajada no servidor
+        })
+        .catch(function (e) { fim('n\u00e3o foi poss\u00edvel carregar a lista completa (' + (e && e.message) + ')'); });
+    }
+    proxima();
+  }
+  var tAuto;
+  function agendarAuto() {
+    clearTimeout(tAuto);
+    tAuto = setTimeout(function () {
+      var total = totalZeev();
+      if (!LC.completo && !LC.carregando && !LC.erro && LC.url && total && total <= CFG.lista.autoAte) carregarTudo();
+    }, 400);
+  }
+  function itensDaLista() {
+    return LC.completo && LC.completo.base === LC.base ? LC.completo.itens.slice() : lerInstancias();
   }
 
   function cardInst(it, layoutId) {
@@ -1320,7 +1499,17 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
 
   function renderInst() {
     if (!uiI.board) return;
-    var todos = lerInstancias();
+    var lidos = itensDaLista();
+    var completo = !!(LC.completo && LC.completo.base === LC.base);
+    var layoutId = layoutInstAtivo();
+    var L = LAYOUTS_INST[layoutId];
+    // O resumo por pessoa e o filtro "Com quem" seguem a esteira escolhida: na Esteira jur\u00eddica,
+    // s\u00f3 entram processos em etapas do jur\u00eddico (a menos que "Mostrar outras \u00e1reas" esteja marcado).
+    var foraDaArea = 0;
+    var todos = lidos.filter(function (it) {
+      if (L.esteira && !stInst.outras && L.place(it) === 'outros') { foraDaArea++; return false; }
+      return true;
+    });
     var chaveAtor = function (it) { return it.ativo && it.quem ? (it.fila ? 'Grupo: ' : '') + it.quem : ''; };
     var atores = {};
     todos.forEach(function (it) {
@@ -1332,14 +1521,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     });
     if (stInst.ator && !atores[stInst.ator]) stInst.ator = '';
     var itens = stInst.ator ? todos.filter(function (it) { return chaveAtor(it) === stInst.ator; }) : todos;
-    var layoutId = layoutInstAtivo();
-    var L = LAYOUTS_INST[layoutId];
-    var foraDaArea = 0;
     var cols = L.cols(), buckets = {}, q = stInst.busca.toLowerCase(), ocultos = 0;
     cols.forEach(function (c) { buckets[c.id] = []; });
     itens.forEach(function (it) {
       var col = L.place(it);
-      if (col === 'outros' && L.esteira && !stInst.outras) { foraDaArea++; return; }
       if (!buckets[col]) return;
       if (q && [it.numero, it.titulo, it.processo, it.atividade, it.quem].join(' ').toLowerCase().indexOf(q) === -1) {
         ocultos++;
@@ -1352,8 +1537,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     // a pessoa confirma com um clique, e a confirma\u00e7\u00e3o vale s\u00f3 para esse total e essa coluna.
     var totalLista = totalZeev();
     var comItens = cols.filter(function (c) { return buckets[c.id].length; });
-    var candidata = (totalLista && totalLista > todos.length && !q && !stInst.ator && !foraDaArea &&
-                     comItens.length === 1 && buckets[comItens[0].id].length === todos.length) ? comItens[0].id : '';
+    var candidata = (!completo && totalLista && totalLista > todos.length && !q && !stInst.ator && !foraDaArea &&
+                     comItens.length === 1 && buckets[comItens[0].id].length === lidos.length) ? comItens[0].id : '';
     var chaveTotal = candidata + '|' + totalLista + '|' + location.pathname;
     var colTotal = candidata && stInst.totalConfirmado === chaveTotal ? candidata : '';
 
@@ -1429,11 +1614,32 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     uiI.resumo.style.display = stInst.view === 'kanban' && lista.length ? '' : 'none';
 
     var total = totalZeev();
-    var parcial = total && total > todos.length;
-    uiI.aviso.textContent = parcial ? 'Mostrando ' + todos.length + ' de ' + fmtN(total) +
-      '. As colunas e a contagem por pessoa consideram s\u00f3 os carregados. Para o n\u00famero exato de uma pessoa, use Filtrar do Zeev pelo respons\u00e1vel: o total "inst\u00e2ncia(s) encontrada(s)" passa a ser o dela.' : '';
-    uiI.aviso.style.display = parcial && !colTotal && stInst.view === 'kanban' ? '' : 'none';
-    uiI.status.textContent = (total ? todos.length + ' de ' + fmtN(total) : todos.length + ' nesta p\u00e1gina') +
+    var parcial = total && total > lidos.length && !(completo && !LC.completo.limitado);
+    var vazia = L.esteira && !todos.length && foraDaArea;
+    uiI.aviso.textContent = vazia
+      ? 'Nenhum dos ' + lidos.length + ' processos desta p\u00e1gina est\u00e1 numa etapa da ' + L.nome + '. ' +
+        (parcial ? 'A lista tem ' + fmtN(total) + ' processos e o Zeev s\u00f3 carregou esta p\u00e1gina: use o Filtrar do Zeev (por exemplo, fluxo Filho e status Em andamento) para trazer os processos desta esteira.' : 'Marque "Mostrar outras \u00e1reas" para ver onde eles est\u00e3o.')
+      : parcial ? 'Mostrando ' + lidos.length + ' de ' + fmtN(total) +
+        '. As colunas e a contagem por pessoa consideram s\u00f3 os carregados. Para o n\u00famero exato de uma pessoa, use Filtrar do Zeev pelo respons\u00e1vel: o total "inst\u00e2ncia(s) encontrada(s)" passa a ser o dela.' : '';
+    if (completo && LC.completo.limitado && !vazia) {
+      uiI.aviso.textContent = 'Carregados os primeiros ' + fmtN(lidos.length) + ' de ' + fmtN(total) +
+        ' (limite de ' + fmtN(CFG.lista.maxItens) + ' para n\u00e3o pesar no Zeev). Filtre a lista para ter os n\u00fameros completos.';
+    }
+    if (LC.erro) uiI.aviso.textContent = 'Lista completa: ' + LC.erro + '. Mostrando s\u00f3 a p\u00e1gina atual.';
+    uiI.aviso.style.display = (vazia || (parcial && !colTotal) || LC.erro || (completo && LC.completo.limitado)) &&
+      stInst.view === 'kanban' ? '' : 'none';
+    // bot\u00e3o de carregar tudo
+    var falta = !completo && total && total > lidos.length && LC.url;
+    uiI.btnTudo.style.display = (falta || LC.carregando) && stInst.view === 'kanban' ? '' : 'none';
+    uiI.btnTudo.textContent = LC.carregando ? LC.prog + ' (cancelar)' :
+      'Carregar todas (' + fmtN(Math.min(total || 0, CFG.lista.maxItens)) + ')';
+    uiI.btnAtual.style.display = completo && !LC.carregando && stInst.view === 'kanban' ? '' : 'none';
+    var origem = completo
+      ? (LC.completo.limitado ? fmtN(lidos.length) + ' de ' + fmtN(total) + ' carregados'
+                              : 'Todas as ' + fmtN(lidos.length) + ' carregadas') +
+        ' \u00e0s ' + LC.completo.em.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+      : (total ? lidos.length + ' de ' + fmtN(total) : lidos.length + ' nesta p\u00e1gina');
+    uiI.status.textContent = origem +
       (stInst.ator ? ' | filtrando: ' + stInst.ator + ' (' + itens.length + ')' : '') +
       (foraDaArea ? ' | ' + foraDaArea + ' em outras \u00e1reas' : '') +
       (ocultos ? ' | ' + ocultos + ' oculto(s) pela busca' : '');
@@ -1507,6 +1713,19 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       tb = setTimeout(function () { stInst.busca = clean(busca.value); renderInst(); }, 150);
     });
     uiI.tools.appendChild(busca);
+    uiI.btnTudo = el('button', 'lcbk-btn');
+    uiI.btnTudo.type = 'button';
+    uiI.btnTudo.addEventListener('click', function () {
+      if (LC.carregando) { LC.cancelar = true; return; }
+      LC.erro = '';
+      carregarTudo();
+    });
+    uiI.tools.appendChild(uiI.btnTudo);
+    uiI.btnAtual = el('button', 'lcbk-btn', 'Atualizar');
+    uiI.btnAtual.type = 'button';
+    uiI.btnAtual.title = 'Buscar de novo todas as p\u00e1ginas';
+    uiI.btnAtual.addEventListener('click', function () { LC.completo = null; LC.erro = ''; carregarTudo(); });
+    uiI.tools.appendChild(uiI.btnAtual);
     uiI.status = el('span', 'lcbk-status');
     uiI.status.setAttribute('aria-live', 'polite');
     uiI.tools.appendChild(uiI.status);
@@ -1522,7 +1741,138 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
 
   var timerI;
+  function vigiarConsultas() {
+    var ver = function (u) { if (MODO === 'tarefas') registrarUrlTarefas(u); else registrarUrl(u); };
+    try {
+      performance.getEntriesByType('resource').forEach(function (e) { ver(e.name); });
+      new PerformanceObserver(function (l) {
+        l.getEntries().forEach(function (e) { ver(e.name); });
+      }).observe({ type: 'resource', buffered: true });
+    } catch (e) { /* navegador sem PerformanceObserver: fica s\u00f3 com a p\u00e1gina atual */ }
+  }
+
+  // Cabe\u00e7alhos das consultas \u00e0 API interna: o Zeev exige o token antifalsifica\u00e7\u00e3o da pr\u00f3pria
+  // p\u00e1gina (campo __RequestVerificationToken). O valor nunca \u00e9 exibido nem guardado.
+  function cabecalhosApi() {
+    var h = { Accept: 'application/json' };
+    var tk = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (tk && tk.value) h['x-sml-antiforgerytoken'] = tk.value;
+    return h;
+  }
+  function getJson(url) {
+    return fetch(url, { method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error',
+                        headers: cabecalhosApi() })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        if (!/json/i.test(r.headers.get('content-type') || '')) throw new Error('resposta n\u00e3o veio em JSON');
+        return r.json();
+      });
+  }
+
+  // \u2550\u2550\u2550 LISTA COMPLETA DE TAREFAS (Executar tarefas) \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+  var PADRAO_TAREFAS = /\/api\/internal\/bpms\/[\d.]+\/assignments\?/i;
+  var LT = { url: '', base: '', completo: null, carregando: false, cancelar: false, prog: '', erro: '', cont: null };
+  function baseTarefas(u) {
+    try {
+      var x = new URL(u, location.origin);
+      x.searchParams.delete('pageNumber'); x.searchParams.delete('recordsPerPage');
+      return x.href;
+    } catch (e) { return ''; }
+  }
+  var tCont, tAutoT;
+  function registrarUrlTarefas(u) {
+    try {
+      var x = new URL(u, location.origin);
+      if (x.origin !== location.origin || !PADRAO_TAREFAS.test(x.pathname + x.search)) return;
+      var b = baseTarefas(x.href);
+      if (LT.carregando && b === LT.base) return;              // nossas pr\u00f3prias consultas
+      LT.url = x.href;
+      if (LT.base !== b) { LT.completo = null; LT.erro = ''; LT.cont = null; }
+      LT.base = b;
+      clearTimeout(tCont); tCont = setTimeout(buscarContagem, 300);
+      clearTimeout(tAutoT); tAutoT = setTimeout(autoTarefas, 900);
+    } catch (e) { /* ignora */ }
+  }
+  function buscarContagem() {
+    try {
+      var x = new URL(LT.base);
+      x.pathname = x.pathname.replace(/\/assignments\/?$/, '/assignments/count-filtered');
+      var base = LT.base;
+      getJson(x.href).then(function (j) {
+        var sx = j && j.success;
+        if (!sx || typeof sx.filtered !== 'number') return;
+        LT.cont = { base: base, filtered: sx.filtered, ontime: Math.min(sx.ontime || 0, sx.filtered), em: new Date() };
+        schedule();
+      }).catch(function () { /* sem contagem: fica com o texto da p\u00e1gina */ });
+    } catch (e) { /* ignora */ }
+  }
+  function autoTarefas() {
+    var tot = LT.cont ? LT.cont.filtered : totalZeev();
+    if (!LT.completo && !LT.carregando && !LT.erro && LT.url && tot && tot <= CFG.lista.autoAte) carregarTarefas();
+  }
+  function nomeDoUsuario(h) {
+    if (!h) return '';
+    var d = new DOMParser().parseFromString(String(h), 'text/html').body;
+    var w = document.createTreeWalker(d, NodeFilter.SHOW_TEXT), n;
+    while ((n = w.nextNode())) { var t = clean(n.nodeValue); if (t.length > 3) return semDoc(t); }
+    return '';
+  }
+  // Item da API de tarefas -> card. O campo "r" (resumo, com CPF) N\u00c3O \u00e9 lido.
+  function daApiTarefa(x) {
+    var now = new Date();
+    var titulo = semDoc(textoDeHtml(x.t));
+    var processo = semDoc(textoDeHtml(x.fn));
+    var due = parseDue({ textContent: textoDeHtml(x.dte), querySelector: function () { return null; } });
+    var late = /danger/i.test(String(x.es || '')) || !!(due && due.date && due.date < now);
+    var tipo = tipoDe(processo), cl = classificar(tipo, titulo);
+    return {
+      kind: 'tarefa', tr: null, taskCell: null, link: null, href: x.lk ? sameOrigin(x.lk) : null,
+      num: digits(x.cfe), numero: '#' + digits(x.cfe), titulo: titulo, processo: processo, atividade: titulo,
+      quem: nomeDoUsuario(x.u), due: due, late: late,
+      today: !late && !!(due && due.date && due.date.toDateString() === now.toDateString()),
+      stage: cl.etapa, area: cl.area, tipo: tipo
+    };
+  }
+  function carregarTarefas() {
+    if (LT.carregando || !LT.url) return;
+    var u = new URL(LT.url);
+    var base = baseTarefas(u.href);
+    var rpp = parseInt(u.searchParams.get('recordsPerPage'), 10) || 60;
+    var total = LT.cont ? LT.cont.filtered : totalZeev();
+    var paginas = Math.max(1, Math.ceil(Math.min(total || CFG.lista.maxItens, CFG.lista.maxItens) / rpp));
+    var itens = [], vistos = {}, p = 1;
+    LT.carregando = true; LT.cancelar = false; LT.erro = ''; LT.base = base;
+    function fim(msg) {
+      LT.carregando = false; LT.prog = '';
+      if (msg) { LT.erro = msg; LT.completo = null; }
+      else if (!LT.cancelar) {
+        LT.completo = { base: base, itens: itens, em: new Date(), limitado: !!(total && total > CFG.lista.maxItens) };
+      }
+      render();
+    }
+    function proxima() {
+      if (LT.cancelar || p > paginas) return fim('');
+      LT.prog = 'Carregando ' + p + ' de ' + paginas + '\u2026';
+      render();
+      u.searchParams.set('pageNumber', String(p));
+      u.searchParams.set('recordsPerPage', String(rpp));
+      getJson(u.href).then(function (j) {
+        var sx = j && j.success, lote = (sx && sx.itens) || [];
+        lote.forEach(function (x) {
+          var it = daApiTarefa(x);
+          var k = it.num + '|' + it.titulo;
+          if (it.num && !vistos[k]) { vistos[k] = 1; itens.push(it); }
+        });
+        if (!sx || !sx.hasmoreitens || !lote.length) return fim('');
+        p++;
+        setTimeout(proxima, 150);
+      }).catch(function (e) { fim('n\u00e3o foi poss\u00edvel carregar a lista completa (' + (e && e.message) + ')'); });
+    }
+    proxima();
+  }
+
   function bootInst(tries) {
+    if (tries === 0) vigiarConsultas();
     var t = tabelaInst();
     if (!t) {
       if (tries < 40) setTimeout(function () { bootInst(tries + 1); }, 250);
