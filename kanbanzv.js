@@ -36,6 +36,14 @@
     keys: { flag: 'lcbKanban', view: 'lcbKanbanView', layout: 'lcbKanbanLayout',
             viewInst: 'lcbKanbanViewInst', layoutInst: 'lcbKanbanLayoutInst' },
 
+    // Atalhos no menu lateral do Zeev. Cada atalho s\u00f3 aparece para quem ligou a chave dele
+    // no pr\u00f3prio navegador (localStorage ou link ?chave=on). Isso controla s\u00f3 a TELA:
+    // o destino precisa ter o pr\u00f3prio controle de acesso.
+    atalhos: [
+      { chave: 'lcbPainel', texto: 'Painel da opera\u00e7\u00e3o', url: 'https://dashboard.lcbank.com.br/',
+        depoisDe: 'Acompanhar solicita\u00e7\u00f5es' }
+    ],
+
     // Seletores da tela Minhas tarefas (DOM visto no v\u00eddeo, out/2026)
     sel: {
       root: '#crudList', table: '.crud-list-table', body: '#taskListBody', row: 'tr.task-card',
@@ -206,6 +214,77 @@
       localStorage.setItem(k, v);
     } catch (e) { return null; }
   }
+  // \u2500\u2500 Ativa\u00e7\u00e3o por link: ?lcbKanban=on|off e ?lcbPainel=on|off (s\u00f3 esses valores) \u2500\u2500
+  (function () {
+    try {
+      var qs = new URLSearchParams(location.search), mudou = false;
+      [CFG.keys.flag].concat(CFG.atalhos.map(function (a) { return a.chave; })).forEach(function (k) {
+        var v = qs.get(k);
+        if (v === 'on' || v === 'off') { ls(k, v); qs.delete(k); mudou = true; }
+      });
+      if (mudou && window.history && history.replaceState) {
+        var q = qs.toString();
+        history.replaceState(history.state, '', location.pathname + (q ? '?' + q : '') + location.hash);
+      }
+    } catch (e) { /* navegador sem URLSearchParams: ignora */ }
+  })();
+
+  // \u2500\u2500 Atalhos no menu lateral (rodam em todas as p\u00e1ginas, independentes do Kanban) \u2500\u2500
+  (function () {
+    var ativos = CFG.atalhos.filter(function (a) {
+      return ls(a.chave) === 'on' && /^https:\/\//.test(a.url);
+    });
+    if (!ativos.length) return;
+    function norm(t) { return String(t || '').replace(/\s+/g, ' ').trim(); }
+    function inserir() {
+      ativos.forEach(function (a) {
+        if (document.querySelector('[data-lcbk-atalho="' + a.chave + '"]')) return;
+        var ref = Array.prototype.find.call(document.querySelectorAll('a'), function (x) {
+          return norm(x.textContent) === a.depoisDe;
+        });
+        if (!ref) return;
+        var item = (ref.closest('li') && ref.closest('li').contains(ref)) ? ref.closest('li') : ref;
+        var clone = item.cloneNode(true);
+        clone.setAttribute('data-lcbk-atalho', a.chave);
+        clone.removeAttribute('id');
+        Array.prototype.forEach.call(clone.querySelectorAll('[id]'), function (x) { x.removeAttribute('id'); });
+        [clone].concat(Array.prototype.slice.call(clone.querySelectorAll('*'))).forEach(function (x) {
+          x.classList.remove('active', 'is-active', 'selected', 'current');
+          x.removeAttribute('aria-current');
+          Array.prototype.slice.call(x.attributes).forEach(function (at) {
+            if (/^data-/.test(at.name) && at.name !== 'data-lcbk-atalho') x.removeAttribute(at.name);
+          });
+        });
+        var link = clone.tagName === 'A' ? clone : clone.querySelector('a');
+        if (!link) return;
+        link.href = a.url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        // troca s\u00f3 o texto do item, mantendo o \u00edcone e o estilo do Zeev
+        var w = document.createTreeWalker(link, NodeFilter.SHOW_TEXT), n, trocou = false;
+        while ((n = w.nextNode())) {
+          if (norm(n.nodeValue)) {
+            if (!trocou) { n.nodeValue = a.texto; trocou = true; } else { n.nodeValue = ''; }
+          }
+        }
+        link.setAttribute('title', a.texto + ' (abre em nova aba)');
+        link.addEventListener('click', function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          window.open(a.url, '_blank', 'noopener,noreferrer');
+        }, true);
+        item.parentNode.insertBefore(clone, item.nextSibling);
+      });
+    }
+    var t, tentativas = 0;
+    function agendar() { clearTimeout(t); t = setTimeout(inserir, 300); }
+    var timer = setInterval(function () {
+      inserir();
+      if (++tentativas > 20) clearInterval(timer);
+    }, 500);
+    try { new MutationObserver(agendar).observe(document.body, { childList: true, subtree: true }); } catch (e) {}
+  })();
+
   var flag = ls(CFG.keys.flag);
   if (flag === 'off' || (CFG.pilot && flag !== 'on')) return;
   var MODO = CFG.path.test(location.pathname) ? 'tarefas' :
@@ -929,6 +1008,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-owner{color:#1b2f5c;font-weight:600}',
       '.lcbk-atv{color:#404857;font-weight:500}',
       '.lcbk-aviso{margin:0 0 10px;padding:8px 12px;border-radius:8px;background:#fff7e6;color:#7a4a00;font-size:12.5px}',
+      '.lcbk-linkbtn{border:0;background:none;padding:0;color:#3b6fd8;font:inherit;font-weight:600;text-decoration:underline;cursor:pointer}',
       '.lcbk-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#404857;cursor:pointer}',
       '.lcbk-chip.is-area{background:#f1f2f5;color:#404857}',
       '@media (max-width:768px){.lcbk-on .lcbk-board{grid-template-columns:repeat(var(--lcbk-cols,4),82vw)}.lcbk-status{margin-left:0}}',
@@ -1227,6 +1307,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     layout: LAYOUTS_INST[ls(CFG.keys.layoutInst)] ? ls(CFG.keys.layoutInst) : '',   // vazio = autom\u00e1tico
     outras: ls('lcbKanbanOutras') === '1',
     ator: '',
+    totalConfirmado: '',
     busca: ''
   };
   var uiI = {};
@@ -1266,12 +1347,15 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       }
       buckets[col].push(it);
     });
-    // Lista filtrada no Zeev (ex.: s\u00f3 a T01): se TODOS os carregados ca\u00edram numa \u00fanica coluna,
-    // o total informado pelo Zeev \u00e9 o total dessa coluna. S\u00f3 vale sem busca/filtro do Kanban.
+    // Se TODOS os carregados ca\u00edram numa \u00fanica coluna, o total do Zeev PODE ser o total dela,
+    // mas s\u00f3 se a lista estiver filtrada por essa etapa. O script n\u00e3o tem como saber isso:
+    // a pessoa confirma com um clique, e a confirma\u00e7\u00e3o vale s\u00f3 para esse total e essa coluna.
     var totalLista = totalZeev();
     var comItens = cols.filter(function (c) { return buckets[c.id].length; });
-    var colTotal = (totalLista && totalLista > todos.length && !q && !stInst.ator && !foraDaArea &&
-                    comItens.length === 1 && buckets[comItens[0].id].length === todos.length) ? comItens[0].id : '';
+    var candidata = (totalLista && totalLista > todos.length && !q && !stInst.ator && !foraDaArea &&
+                     comItens.length === 1 && buckets[comItens[0].id].length === todos.length) ? comItens[0].id : '';
+    var chaveTotal = candidata + '|' + totalLista + '|' + location.pathname;
+    var colTotal = candidata && stInst.totalConfirmado === chaveTotal ? candidata : '';
 
     var frag = document.createDocumentFragment();
     cols.forEach(function (c) {
@@ -1284,7 +1368,19 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var n = list.length;
       if (c.id === colTotal) {
         n = totalLista;
-        h.appendChild(el('small', null, 'Total da lista filtrada no Zeev (' + list.length + ' nesta p\u00e1gina)'));
+        var sm = el('small', null, 'Total da lista do Zeev, confirmado por voc\u00ea (' + list.length + ' nesta p\u00e1gina) ');
+        var desf = el('button', 'lcbk-linkbtn', 'desfazer');
+        desf.type = 'button';
+        desf.addEventListener('click', function () { stInst.totalConfirmado = ''; renderInst(); });
+        sm.appendChild(desf);
+        h.appendChild(sm);
+      } else if (c.id === candidata) {
+        var sm2 = el('small', null, list.length + ' nesta p\u00e1gina. Lista filtrada s\u00f3 por esta etapa? ');
+        var usar = el('button', 'lcbk-linkbtn', 'Usar total do Zeev (' + fmtN(totalLista) + ')');
+        usar.type = 'button';
+        usar.addEventListener('click', function () { stInst.totalConfirmado = chaveTotal; renderInst(); });
+        sm2.appendChild(usar);
+        h.appendChild(sm2);
       } else if (c.dica) {
         h.appendChild(el('small', null, c.dica));
       }
