@@ -24,8 +24,10 @@
     // p\u00e1gina por p\u00e1gina. S\u00f3 GET no pr\u00f3prio Zeev, com a sess\u00e3o da pessoa.
     lista: {
       padrao: /\/api\/internal\/bpms\/[\d.]+\/instances\?/i,
-      autoAte: 600,      // carrega sozinho quando a lista filtrada tem at\u00e9 isso
-      maxItens: 3000     // nunca passa disso (protege o Zeev); acima, pede para filtrar
+      autoAte: 25000,        // carrega sozinho at\u00e9 esse total (acima, s\u00f3 com o bot\u00e3o)
+      maxItens: 25000,       // teto absoluto por carga
+      tamanhoPagina: 500,    // pede p\u00e1ginas grandes; se o Zeev limitar, o script se ajusta
+      cardsPorColuna: 100    // desenha at\u00e9 isso por coluna ("Mostrar mais" para o resto); contagens s\u00e3o do total
     },
     inst: {
       cell: 'td.instance-cell',
@@ -154,16 +156,16 @@
       pai: {
         'T01': ['triagem', 'triagem'],          // Analisar Viabilidade do Processo
         'T07': ['triagem', 'acompanhar'],       // Acompanhar Lead
-        'T02': ['triagem', 'ppp'],              // Analisar Processo e Negociar Compra
-        'T06': ['triagem', 'ppp'],
+        'T02': ['comercial', 'ppp'],            // Analisar Processo e Negociar Compra (vendedores)
+        'T06': ['comercial', 'ppp'],
         'T03': ['triagem', 'ppf'],              // Cadastrar Cliente no Astrea
         'T04': ['triagem', 'ppf'],              // Aguardando Pr\u00f3xima An\u00e1lise
         'T05': ['triagem', 'ppf']               // Analisar e Classificar Processo PPF
       },
       relacionamento: {
         'T01': ['triagem', 'triagem'],          // Analisar Relacionamento RD
-        'T02': ['triagem', 'ppp'],
-        'T06': ['triagem', 'ppp'],
+        'T02': ['comercial', 'ppp'],            // vendedores
+        'T06': ['comercial', 'ppp'],
         'T03': ['triagem', 'ppf'],
         'T04': ['triagem', 'ppf'],
         'T05': ['triagem', 'ppf']
@@ -179,7 +181,7 @@
     // Filas de grupo: o Zeev s\u00f3 informa o 1\u00ba nome e "+N". Para as filas conhecidas,
     // o Kanban mostra o nome da fila e quem faz parte dela. [fluxo, c\u00f3digo da atividade, nome, membros]
     filas: [
-      ['pai', 'T01', 'Fila da triagem', 'Ingrid, Wagner, R\u00e9gis, Gabriel']
+      ['pai', 'T01', 'Triagem', 'Ingrid, Wagner, R\u00e9gis, Gabriel']
     ],
     nomesArea: { comercial: 'Comercial', financeiro: 'Financeiro', juridico: 'Jur\u00eddico', conselho: 'Conselho', triagem: 'Triagem' },
     // Esteiras por time. Coluna = [id, nome, \u00e1reas, etapas] ('*' = qualquer).
@@ -187,6 +189,7 @@
       comercial: {
         nome: 'Esteira comercial',
         cols: [
+          ['ppp', 'PPP (negociar compra)', ['comercial'], ['ppp']],
           ['negociacao', 'Negocia\u00e7\u00e3o', ['comercial'], ['negociacao']],
           ['proposta', 'Proposta & Aprova\u00e7\u00e3o', ['comercial', 'financeiro'], ['proposta']],
           ['pendencias', 'Pend\u00eancias', ['comercial'], ['pendencias']],
@@ -212,7 +215,7 @@
           ['triagem', 'Triagem', ['triagem'], ['triagem']],
           ['acompanhar', 'Acompanhar lead', ['triagem'], ['acompanhar']],
           ['ppf', 'PPF (proposta futura)', ['triagem'], ['ppf']],
-          ['ppp', 'PPP (negociar compra)', ['triagem'], ['ppp']],
+          ['ppp', 'PPP (negociar compra)', ['triagem', 'comercial'], ['ppp']],
           ['negociacao', 'Em negocia\u00e7\u00e3o', ['comercial', 'financeiro', 'juridico', 'conselho'], ['*']]
         ]
       }
@@ -711,6 +714,14 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     }
   }
 
+  function botaoMais(resto, onClick) {
+    var b = el('button', 'lcbk-btn lcbk-mais',
+      'Mostrar mais ' + fmtN(Math.min(resto, CFG.lista.cardsPorColuna)) + ' (' + fmtN(resto) + ' restantes)');
+    b.type = 'button';
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
   function card(it, layoutId) {
     var lead = it.kind === 'lead';
     var parado = lead && !it.finalizado && it.desde && dias(it.desde) >= CFG.acompanhamento.paradoDias;
@@ -787,6 +798,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     layout: LAYOUTS[ls(CFG.keys.layout)] ? ls(CFG.keys.layout) : '',   // vazio = autom\u00e1tico
     area: ls('lcbKanbanArea') || '',
     busca: '',
+    lim: {},
     dono: '',
     fase: ''
   };
@@ -862,7 +874,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function render() {
     if (!ui.board) return;
     var completoT = !!(LT.completo && LT.completo.base === LT.base);
-    var tarefas = completoT ? LT.completo.itens.slice() : lerTarefas();
+    var tarefas = completoT ? LT.completo.itens.slice()
+      : (LT.carregando && LT.parcial && LT.parcial.length ? LT.parcial.slice() : lerTarefas());
     state.area = detectarArea(tarefas);
     var numsComigo = {};
     tarefas.forEach(function (t) { if (t.num) numsComigo[t.num] = true; });
@@ -919,7 +932,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var body = el('div', 'lcbk-list');
       if (c.precisaB && B.status !== 'ok') body.appendChild(avisoB());
       else if (!list.length) body.appendChild(el('p', 'lcbk-empty', q ? 'Nada com esse filtro' : 'Nada aqui'));
-      ordenar(c.id, list).forEach(function (it) { it._col = c; body.appendChild(card(it, layoutId)); });
+      var ordT = ordenar(c.id, list), limT = (state.lim[c.id] || CFG.lista.cardsPorColuna);
+      ordT.slice(0, limT).forEach(function (it) { it._col = c; body.appendChild(card(it, layoutId)); });
+      if (ordT.length > limT) body.appendChild(botaoMais(ordT.length - limT, function () {
+        state.lim[c.id] = limT + CFG.lista.cardsPorColuna; render();
+      }));
       sec.appendChild(body);
       frag.appendChild(sec);
     });
@@ -949,6 +966,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     ui.btnTudo.style.display = (faltaT || LT.carregando) && state.view === 'kanban' ? '' : 'none';
     ui.btnTudo.textContent = LT.carregando ? LT.prog + ' (cancelar)' :
       'Carregar todas (' + fmtN(Math.min(totT || 0, CFG.lista.maxItens)) + ')';
+    if (LT.carregando) ui.btnTudo.textContent = LT.prog + ' Cancelar';
     ui.btnAtual.style.display = completoT && !LT.carregando && state.view === 'kanban' ? '' : 'none';
     ui.status.textContent = st + (ocultos ? (st ? ' | ' : '') + ocultos + ' oculto(s) pelo filtro' : '');
     document.documentElement.classList.toggle('lcbk-on', state.view === 'kanban');
@@ -1040,6 +1058,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-resumo{display:flex;gap:8px;overflow-x:auto;padding:0 0 12px}',
       '.lcbk-pessoa{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:150px;text-align:left;border:1px solid #d9dce3;border-radius:8px;background:#fff;padding:8px 12px;font-family:inherit;font-size:12px;color:#5e6c84;cursor:pointer}',
       '.lcbk-pessoa strong{font-size:13px;color:#172b4d}',
+      '.lcbk-pessoa.is-fila{border-style:dashed;background:#fafbfc}',
+      '.lcbk-pessoa.is-fila .lcbk-time{color:#b45f0e}',
       '.lcbk-time{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#6a3fb5}',
       '.lcbk-pessoa .is-stuck{color:#b45f0e;font-weight:600}',
       '.lcbk-pessoa .is-you{color:#3b6fd8}',
@@ -1049,6 +1069,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-atv{color:#404857;font-weight:500}',
       '.lcbk-aviso{margin:0 0 10px;padding:8px 12px;border-radius:8px;background:#fff7e6;color:#7a4a00;font-size:12.5px}',
       '.lcbk-linkbtn{border:0;background:none;padding:0;color:#3b6fd8;font:inherit;font-weight:600;text-decoration:underline;cursor:pointer}',
+      '.lcbk-mais{width:100%;margin-top:4px;background:#fff}',
       '.lcbk-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#404857;cursor:pointer}',
       '.lcbk-chip.is-area{background:#f1f2f5;color:#404857}',
       '@media (max-width:768px){.lcbk-on .lcbk-board{grid-template-columns:repeat(var(--lcbk-cols,4),82vw)}.lcbk-status{margin-left:0}}',
@@ -1337,7 +1358,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   // \u2550\u2550\u2550 LISTA COMPLETA (todas as p\u00e1ginas da consulta atual) \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
   var LC = { url: '', base: '', completo: null, carregando: false, cancelar: false, prog: '', erro: '' };
   function baseDe(u) {
-    try { var x = new URL(u, location.origin); x.searchParams.delete('pagenumber'); return x.href; }
+    try { var x = new URL(u, location.origin); x.searchParams.delete('pagenumber'); x.searchParams.delete('recordsperpage'); return x.href; }
     catch (e) { return ''; }
   }
   function registrarUrl(u) {
@@ -1355,6 +1376,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   function textoDeHtml(h) {
     if (h == null) return '';
+    if (!/[<&]/.test(String(h))) return clean(h);
     return clean(new DOMParser().parseFromString(String(h), 'text/html').body.textContent);
   }
   // Converte um item da API no mesmo formato dos cards. Do resumo, s\u00f3 o NOME \u00e9 aproveitado.
@@ -1394,46 +1416,36 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (LC.carregando || !LC.url) return;
     var u = new URL(LC.url);
     var base = baseDe(u.href);
-    var rpp = parseInt(u.searchParams.get('recordsperpage'), 10) || 60;
     var total = totalZeev();
-    var alvo = Math.min(total || CFG.lista.maxItens, CFG.lista.maxItens);
-    var paginas = Math.max(1, Math.ceil(alvo / rpp));
-    var itens = [], vistos = {}, p = 1;
-    LC.carregando = true; LC.cancelar = false; LC.erro = ''; LC.base = base;
-    function fim(msgErro) {
-      LC.carregando = false; LC.prog = '';
-      if (msgErro) { LC.erro = msgErro; LC.completo = null; }
+    var rpp = CFG.lista.tamanhoPagina, p = 1, itens = [], vistos = {};
+    LC.carregando = true; LC.cancelar = false; LC.erro = ''; LC.base = base; LC.parcial = itens;
+    function fim(msg) {
+      LC.carregando = false; LC.prog = ''; LC.parcial = null;
+      if (msg) { LC.erro = msg; LC.completo = null; }
       else if (!LC.cancelar) {
-        LC.completo = { base: base, itens: itens, em: new Date(),
-                        limitado: !!(total && total > CFG.lista.maxItens), total: total };
+        LC.completo = { base: base, itens: itens, em: new Date(), total: total,
+                        limitado: !!(total && total > itens.length && itens.length >= CFG.lista.maxItens) };
       }
       renderInst();
     }
     function proxima() {
       if (LC.cancelar) return fim('');
-      if (p > paginas) return fim('');
-      LC.prog = 'Carregando ' + p + ' de ' + paginas + '\u2026';
+      LC.prog = 'Carregando ' + fmtN(itens.length) + (total ? ' de ' + fmtN(total) : '') + '\u2026';
       renderInst();
       u.searchParams.set('pagenumber', String(p));
-      fetch(u.href, { method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error',
-                      headers: cabecalhosApi() })
-        .then(function (r) {
-          if (!r.ok) throw new Error('HTTP ' + r.status);
-          if (!/json/i.test(r.headers.get('content-type') || '')) throw new Error('resposta n\u00e3o veio em JSON');
-          return r.json();
-        })
-        .then(function (j) {
-          var sx = j && j.success;
-          var lote = (sx && sx.itens) || [];
-          lote.forEach(function (x) {
-            var it = daApi(x);
-            if (it.num && !vistos[it.num]) { vistos[it.num] = 1; itens.push(it); }
-          });
-          if (!sx || !sx.hasmoreitens || !lote.length) return fim('');
-          p++;
-          setTimeout(proxima, 150);                        // sem rajada no servidor
-        })
-        .catch(function (e) { fim('n\u00e3o foi poss\u00edvel carregar a lista completa (' + (e && e.message) + ')'); });
+      u.searchParams.set('recordsperpage', String(rpp));
+      getJson(u.href).then(function (j) {
+        var sx = j && j.success, lote = (sx && sx.itens) || [];
+        // o Zeev pode limitar o tamanho da p\u00e1gina: a 1\u00aa resposta diz o tamanho real
+        if (p === 1 && sx && sx.hasmoreitens && lote.length && lote.length < rpp) rpp = lote.length;
+        lote.forEach(function (x) {
+          var it = daApi(x);
+          if (it.num && !vistos[it.num]) { vistos[it.num] = 1; itens.push(it); }
+        });
+        if (!sx || !sx.hasmoreitens || !lote.length || itens.length >= CFG.lista.maxItens) return fim('');
+        p++;
+        setTimeout(proxima, 120);                          // sem rajada no servidor
+      }).catch(function (e) { fim('n\u00e3o foi poss\u00edvel carregar a lista completa (' + (e && e.message) + ')'); });
     }
     proxima();
   }
@@ -1446,7 +1458,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     }, 400);
   }
   function itensDaLista() {
-    return LC.completo && LC.completo.base === LC.base ? LC.completo.itens.slice() : lerInstancias();
+    if (LC.completo && LC.completo.base === LC.base) return LC.completo.itens.slice();
+    if (LC.carregando && LC.parcial && LC.parcial.length) return LC.parcial.slice();   // vai preenchendo
+    return lerInstancias();
   }
 
   // "Fila da triagem: Ingrid, Wagner, R\u00e9gis, Gabriel" para filas conhecidas;
@@ -1461,13 +1475,22 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     return it.tipo === 'filho' ? 'filho' : 'triagem';
   }
 
+  // Fila = ningu\u00e9m assumiu. Nunca \u00e9 atribu\u00edda a uma pessoa.
   function rotuloFila(it) {
     var cod = codigoDe(it.atividade);
     for (var i = 0; i < CFG.filas.length; i++) {
       var f = CFG.filas[i];
-      if (f[0] === it.tipo && f[1] === cod) return f[2] + ': ' + f[3];
+      if (f[0] === it.tipo && f[1] === cod) return 'Na fila: ' + f[2] + ' (' + f[3].split(',').length + ' pessoas)';
     }
-    return 'Fila: ' + it.quem + (it.mais ? ' e mais ' + it.mais : '');
+    return 'Na fila: ' + (cod || 'grupo') + (it.mais ? ' (' + (it.mais + 1) + ' pessoas)' : '');
+  }
+  function membrosFila(it) {
+    var cod = codigoDe(it.atividade);
+    for (var i = 0; i < CFG.filas.length; i++) {
+      var f = CFG.filas[i];
+      if (f[0] === it.tipo && f[1] === cod) return f[3];
+    }
+    return it.quem + (it.mais ? ' e mais ' + it.mais : '');
   }
 
   function cardInst(it, layoutId) {
@@ -1503,7 +1526,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var foot = el('div', 'lcbk-foot');
     if (it.ativo) {
       if (it.prazoTxt) foot.appendChild(el('span', 'lcbk-due', 'Prazo: ' + it.prazoTxt));
-      if (it.quem) foot.appendChild(el('span', 'lcbk-who', it.fila ? rotuloFila(it) : 'Com ' + it.quem));
+      if (it.quem) {
+        var w = el('span', 'lcbk-who', it.fila ? 'Na fila \u00b7 ningu\u00e9m assumiu' : 'Com ' + it.quem);
+        if (it.fila) w.title = 'Pode ser assumida por: ' + membrosFila(it);
+        foot.appendChild(w);
+      }
     } else if (it.fimEm) {
       foot.appendChild(el('span', 'lcbk-due', 'Encerrada em ' + fmtData(it.fimEm)));
     }
@@ -1516,6 +1543,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     layout: LAYOUTS_INST[ls(CFG.keys.layoutInst)] ? ls(CFG.keys.layoutInst) : '',   // vazio = autom\u00e1tico
     outras: ls('lcbKanbanOutras') === '1',
     ator: '',
+    lim: {},
     time: ['triagem', 'comercial', 'juridico'].indexOf(ls('lcbKanbanTime')) !== -1 ? ls('lcbKanbanTime') : '',
     totalConfirmado: '',
     busca: ''
@@ -1550,7 +1578,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     todos.forEach(function (it) {
       var k = chaveAtor(it);
       if (!k) return;
-      var a = atores[k] || (atores[k] = { k: k, total: 0, atrasados: 0, times: {} });
+      var a = atores[k] || (atores[k] = { k: k, total: 0, atrasados: 0, times: {}, fila: !!it.fila,
+                                          membros: it.fila ? membrosFila(it) : '' });
       a.total++;
       if (it.late) a.atrasados++;
       var tm = timeDe(it);
@@ -1616,7 +1645,12 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         var da = a.due && a.due.date ? a.due.date.getTime() : 8.64e15;
         var db = b.due && b.due.date ? b.due.date.getTime() : 8.64e15;
         return da - db;
-      }).forEach(function (it) { it._col = c; body.appendChild(cardInst(it, layoutId)); });
+      });
+      var limI = (stInst.lim[c.id] || CFG.lista.cardsPorColuna);
+      list.slice(0, limI).forEach(function (it) { it._col = c; body.appendChild(cardInst(it, layoutId)); });
+      if (list.length > limI) body.appendChild(botaoMais(list.length - limI, function () {
+        stInst.lim[c.id] = limI + CFG.lista.cardsPorColuna; renderInst();
+      }));
       sec.appendChild(body);
       frag.appendChild(sec);
     });
@@ -1634,11 +1668,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     });
     uiI.fAtor.replaceChildren(el('option', null, 'Com quem: todos'));
     uiI.fAtor.options[0].value = '';
-    ['triagem', 'comercial', 'juridico', ''].forEach(function (t) {
-      var doTime = lista.filter(function (a) { return a.time === t; });
+    ['triagem', 'comercial', 'juridico', '', 'fila'].forEach(function (t) {
+      var doTime = lista.filter(function (a) { return t === 'fila' ? a.fila : (!a.fila && a.time === t); });
       if (!doTime.length) return;
       var g = el('optgroup');
-      g.label = NOMES_TIME[t] || 'Outros';
+      g.label = t === 'fila' ? 'Na fila (ningu\u00e9m assumiu)' : (NOMES_TIME[t] || 'Outros');
       doTime.forEach(function (a) {
         var o = el('option', null, a.k + ' (' + a.total + ')');
         o.value = a.k;
@@ -1651,12 +1685,14 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var box = el('div', 'lcbk-resumo');
     box.setAttribute('role', 'group');
     box.setAttribute('aria-label', 'Quantos est\u00e3o com cada pessoa');
-    lista.slice().sort(function (a, b) { return ORDEM_TIME[a.time] - ORDEM_TIME[b.time] || b.total - a.total; })
-      .slice(0, 40).forEach(function (a) {
-      var b = el('button', 'lcbk-pessoa' + (stInst.ator === a.k ? ' is-on' : ''));
+    lista.slice().sort(function (a, b) {
+      return (a.fila - b.fila) || ORDEM_TIME[a.time] - ORDEM_TIME[b.time] || b.total - a.total;
+    }).slice(0, 60).forEach(function (a) {
+      var b = el('button', 'lcbk-pessoa' + (a.fila ? ' is-fila' : '') + (stInst.ator === a.k ? ' is-on' : ''));
+      if (a.fila) b.title = 'Ningu\u00e9m assumiu. Pode ser assumida por: ' + a.membros;
       b.type = 'button';
       b.setAttribute('aria-pressed', stInst.ator === a.k ? 'true' : 'false');
-      if (a.time) b.appendChild(el('span', 'lcbk-time', NOMES_TIME[a.time]));
+      b.appendChild(el('span', 'lcbk-time', a.fila ? 'Sem dono' : (NOMES_TIME[a.time] || 'Outros')));
       b.appendChild(el('strong', null, a.k));
       b.appendChild(el('span', null, a.total + (a.total === 1 ? ' processo' : ' processos')));
       if (a.atrasados) b.appendChild(el('span', 'is-stuck', a.atrasados + (a.atrasados === 1 ? ' atrasado' : ' atrasados')));
@@ -1686,6 +1722,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     uiI.btnTudo.style.display = (falta || LC.carregando) && stInst.view === 'kanban' ? '' : 'none';
     uiI.btnTudo.textContent = LC.carregando ? LC.prog + ' (cancelar)' :
       'Carregar todas (' + fmtN(Math.min(total || 0, CFG.lista.maxItens)) + ')';
+    if (LC.carregando) uiI.btnTudo.textContent = LC.prog + ' Cancelar';
     uiI.btnAtual.style.display = completo && !LC.carregando && stInst.view === 'kanban' ? '' : 'none';
     var origem = completo
       ? (LC.completo.limitado ? fmtN(lidos.length) + ' de ' + fmtN(total) + ' carregados'
@@ -1903,35 +1940,35 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (LT.carregando || !LT.url) return;
     var u = new URL(LT.url);
     var base = baseTarefas(u.href);
-    var rpp = parseInt(u.searchParams.get('recordsPerPage'), 10) || 60;
     var total = LT.cont ? LT.cont.filtered : totalZeev();
-    var paginas = Math.max(1, Math.ceil(Math.min(total || CFG.lista.maxItens, CFG.lista.maxItens) / rpp));
-    var itens = [], vistos = {}, p = 1;
-    LT.carregando = true; LT.cancelar = false; LT.erro = ''; LT.base = base;
+    var rpp = CFG.lista.tamanhoPagina, p = 1, itens = [], vistos = {};
+    LT.carregando = true; LT.cancelar = false; LT.erro = ''; LT.base = base; LT.parcial = itens;
     function fim(msg) {
-      LT.carregando = false; LT.prog = '';
+      LT.carregando = false; LT.prog = ''; LT.parcial = null;
       if (msg) { LT.erro = msg; LT.completo = null; }
       else if (!LT.cancelar) {
-        LT.completo = { base: base, itens: itens, em: new Date(), limitado: !!(total && total > CFG.lista.maxItens) };
+        LT.completo = { base: base, itens: itens, em: new Date(),
+                        limitado: !!(total && total > itens.length && itens.length >= CFG.lista.maxItens) };
       }
       render();
     }
     function proxima() {
-      if (LT.cancelar || p > paginas) return fim('');
-      LT.prog = 'Carregando ' + p + ' de ' + paginas + '\u2026';
+      if (LT.cancelar) return fim('');
+      LT.prog = 'Carregando ' + fmtN(itens.length) + (total ? ' de ' + fmtN(total) : '') + '\u2026';
       render();
       u.searchParams.set('pageNumber', String(p));
       u.searchParams.set('recordsPerPage', String(rpp));
       getJson(u.href).then(function (j) {
         var sx = j && j.success, lote = (sx && sx.itens) || [];
+        if (p === 1 && sx && sx.hasmoreitens && lote.length && lote.length < rpp) rpp = lote.length;
         lote.forEach(function (x) {
           var it = daApiTarefa(x);
           var k = it.num + '|' + it.titulo;
           if (it.num && !vistos[k]) { vistos[k] = 1; itens.push(it); }
         });
-        if (!sx || !sx.hasmoreitens || !lote.length) return fim('');
+        if (!sx || !sx.hasmoreitens || !lote.length || itens.length >= CFG.lista.maxItens) return fim('');
         p++;
-        setTimeout(proxima, 150);
+        setTimeout(proxima, 120);
       }).catch(function (e) { fim('n\u00e3o foi poss\u00edvel carregar a lista completa (' + (e && e.message) + ')'); });
     }
     proxima();
