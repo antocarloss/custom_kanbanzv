@@ -20,6 +20,29 @@
     // Acompanhar solicita\u00e7\u00f5es / Monitorar: qualquer p\u00e1gina /my/... ou /report/... que tenha a
     // tabela de inst\u00e2ncias. A detec\u00e7\u00e3o final \u00e9 pelo HTML (td.instance-cell).
     pathInstancias: /^\/(my|report)\//,
+    // Produ\u00e7\u00e3o e fechamentos (Vis\u00e3o do gestor): lidos do LOG DE TAREFAS do pr\u00f3prio Zeev
+    // (export "tarefas"), com as mesmas regras da Torre de Controle.
+    producao: {
+      // [c\u00f3digo, vers\u00e3o, papel] \u2014 papel: pai | carteira | filho | relacionamento
+      fluxos: [
+        ['131', 'ed27886d-d993-4dae-9aad-e850268e0b36', 'pai'],
+        ['144', '09f5cfe1-e50b-4ae6-b796-f98b67721377', 'carteira'],
+        ['121', 'a70ebe16-6ed9-49d5-bd84-41417947efc1', 'filho'],
+        ['128', '333a27bc-23a1-4663-80f8-52483f065654', 'filho'],
+        ['153', 'd8a2b914-5316-4224-bdf5-2cf874e6f8aa', 'relacionamento']
+      ],
+      inicioBase: '01/01/2020',   // solicita\u00e7\u00f5es em andamento abertas desde esta data
+      limiteLinhas: 1000,         // o Zeev corta o export aqui: com 1.000 linhas, divide o per\u00edodo
+      atualizarMin: 15,
+      triagem: 'T01',             // Pai: T01-Analisar Viabilidade finalizada = 1 triagem (data de finaliza\u00e7\u00e3o)
+      aceite: 'T07',              // Filho: entrou na T07 = proposta aceita (data de recebimento da 1\u00aa T07)
+      formal: 'T24',              // Filho: T24 finalizada = cess\u00e3o protocolada (data de finaliza\u00e7\u00e3o)
+      sdr: ['Raphisa']            // se a SDR for a solicitante do Filho, o dono \u00e9 quem fez a T01-Negociar Compra
+    },
+
+    // Vis\u00e3o do gestor: s\u00f3 nesta p\u00e1gina (Monitorar > Solicita\u00e7\u00f5es). Quem controla o acesso \u00e9 a
+    // permiss\u00e3o de Monitorar do pr\u00f3prio Zeev; o script s\u00f3 mostra o painel onde ela j\u00e1 vale.
+    pathGestor: /^\/report\/main\/?$/,
     // Lista completa: o script repete a MESMA consulta que a tela fez (mesmos filtros),
     // p\u00e1gina por p\u00e1gina. S\u00f3 GET no pr\u00f3prio Zeev, com a sess\u00e3o da pessoa.
     lista: {
@@ -42,7 +65,7 @@
       acao: '.instance-cell--action'
     },
     pilot: false,                        // true = s\u00f3 liga com localStorage.lcbKanban = 'on'
-    keys: { flag: 'lcbKanban', view: 'lcbKanbanView', layout: 'lcbKanbanLayout',
+    keys: { flag: 'lcbKanban', gestor: 'lcbGestor', view: 'lcbKanbanView', layout: 'lcbKanbanLayout',
             viewInst: 'lcbKanbanViewInst', layoutInst: 'lcbKanbanLayoutInst' },
 
     // Atalhos no menu lateral do Zeev. Cada atalho s\u00f3 aparece para quem ligou a chave dele
@@ -233,7 +256,7 @@
   (function () {
     try {
       var qs = new URLSearchParams(location.search), mudou = false;
-      [CFG.keys.flag].concat(CFG.atalhos.map(function (a) { return a.chave; })).forEach(function (k) {
+      [CFG.keys.flag, CFG.keys.gestor].concat(CFG.atalhos.map(function (a) { return a.chave; })).forEach(function (k) {
         var v = qs.get(k);
         if (v === 'on' || v === 'off') { ls(k, v); qs.delete(k); mudou = true; }
       });
@@ -1069,6 +1092,99 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-atv{color:#404857;font-weight:500}',
       '.lcbk-aviso{margin:0 0 10px;padding:8px 12px;border-radius:8px;background:#fff7e6;color:#7a4a00;font-size:12.5px}',
       '.lcbk-linkbtn{border:0;background:none;padding:0;color:#3b6fd8;font:inherit;font-weight:600;text-decoration:underline;cursor:pointer}',
+      '.lcbk-painel{margin:0 0 16px;background:#fff;border:1px solid #e3e6ec;border-radius:12px;padding:18px 20px}',
+      '.lcbk-g-head{display:flex;align-items:flex-start;gap:16px;margin:0 0 14px}',
+      '.lcbk-g-head h2{margin:0;font-size:20px;font-weight:700;color:#1b2f5c;letter-spacing:-.01em}',
+      '.lcbk-g-head p{margin:2px 0 0;font-size:12.5px;color:#6b778c}',
+      '.lcbk-g-head .lcbk-btn{margin-left:auto}',
+      '.lcbk-funil{display:flex;gap:4px;margin:0 0 10px;overflow-x:auto}',
+      '.lcbk-etapa{flex:1 1 0;min-width:130px;display:flex;flex-direction:column;align-items:flex-start;gap:2px;border:0;margin:0;font-family:inherit;text-align:left;color:#fff;background:var(--c);padding:12px 18px 12px 26px;clip-path:polygon(0 0,calc(100% - 14px) 0,100% 50%,calc(100% - 14px) 100%,0 100%,14px 50%)}',
+      '.lcbk-etapa.is-primeira{padding-left:16px;border-radius:8px 0 0 8px;clip-path:polygon(0 0,calc(100% - 14px) 0,100% 50%,calc(100% - 14px) 100%,0 100%)}',
+      'button.lcbk-etapa{cursor:pointer}',
+      'button.lcbk-etapa:hover{filter:brightness(1.08)}',
+      'button.lcbk-etapa:focus-visible{outline:3px solid #172b4d;outline-offset:-3px}',
+      '.lcbk-etapa .n{font-size:28px;font-weight:700;line-height:1.05;font-variant-numeric:tabular-nums}',
+      '.lcbk-etapa .t{font-size:12.5px;font-weight:600;opacity:.95}',
+      '.lcbk-etapa .s{font-size:11.5px;opacity:.8}',
+      '.lcbk-alerta{display:inline-flex;align-items:baseline;gap:4px;border:0;background:#fbeceb;color:#8f241c;font-family:inherit;font-size:13px;border-radius:999px;padding:6px 14px;margin:0 0 16px;cursor:pointer}',
+      '.lcbk-alerta strong{font-weight:700}',
+      '.lcbk-time-sec{margin:18px 0 0}',
+      '.lcbk-time-head{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0 0 10px;padding-left:10px;border-left:4px solid var(--c)}',
+      '.lcbk-time-head h3{margin:0 6px 0 0;font-size:16px;font-weight:700;color:#172b4d}',
+      '.lcbk-chip-t{font-size:12px;color:#404857;background:#f1f3f7;border-radius:999px;padding:3px 10px}',
+      '.lcbk-chip-t.is-alerta{background:#fbeceb;color:#8f241c;font-weight:600}',
+      '.lcbk-pc-grade{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}',
+      '.lcbk-pc{display:flex;flex-direction:column;gap:6px;text-align:left;font-family:inherit;background:#fff;border:1px solid #e3e6ec;border-radius:12px;padding:14px 14px 12px;cursor:pointer;position:relative;overflow:hidden}',
+      '.lcbk-pc::before{content:"";position:absolute;inset:0 0 auto 0;height:4px;background:var(--c)}',
+      '.lcbk-pc:hover{border-color:var(--c)}',
+      '.lcbk-pc.is-on{border-color:var(--c);box-shadow:inset 0 0 0 1px var(--c)}',
+      '.lcbk-pc:focus-visible{outline:2px solid #3b6fd8;outline-offset:2px}',
+      '.lcbk-pc-topo{display:flex;align-items:center;gap:10px}',
+      '.lcbk-av{flex:none;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:var(--c);color:#fff;font-size:12.5px;font-weight:700}',
+      '.lcbk-pc-nome{font-size:13.5px;font-weight:600;color:#172b4d;line-height:1.25;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}',
+      '.lcbk-pc-big{display:flex;align-items:baseline;gap:8px;margin-top:4px}',
+      '.lcbk-pc-big .n{font-size:34px;font-weight:800;line-height:1;color:var(--c);font-variant-numeric:tabular-nums}',
+      '.lcbk-pc-big .l{font-size:12px;color:#5e6c84;line-height:1.2}',
+      '.lcbk-pc-sub{font-size:12px;color:#404857;font-weight:600}',
+      '.lcbk-pc-lin{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}',
+      '.lcbk-pc-x{font-size:11.5px;color:#404857;background:#f4f6f9;border-radius:6px;padding:3px 7px}',
+      '.lcbk-pc-x strong{font-weight:700;color:#172b4d}',
+      '.lcbk-pc-x.is-alerta{background:#fbeceb;color:#8f241c}',
+      '.lcbk-pc-x.is-alerta strong{color:#8f241c}',
+      '.lcbk-pc-alerta{font-size:11.5px;color:#a1281f;margin-top:2px}',
+      '.lcbk-viz-larga{margin-top:20px;border:1px solid #e3e6ec;border-radius:12px;padding:14px 16px}',
+      '.lcbk-viz-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px 32px}',
+      '.lcbk-viz-head h3{margin:0;font-size:14px;font-weight:700;color:#172b4d}',
+      '.lcbk-viz-head p{margin:2px 0 10px;font-size:12px;color:#6b778c}',
+      '.lcbk-viz-vazio,.lcbk-viz-mais{font-size:12.5px;color:#6b778c;margin:6px 0}',
+      '.lcbk-bars{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px}',
+      '.lcbk-bar{display:grid;grid-template-columns:minmax(110px,170px) 1fr auto;align-items:center;column-gap:10px;border-radius:6px;padding:2px 4px}',
+      '.lcbk-bar[role=button]{cursor:pointer}',
+      '.lcbk-bar[role=button]:hover,.lcbk-bar.is-on{background:#f1f4fa}',
+      '.lcbk-bar[role=button]:focus-visible{outline:2px solid #3b6fd8;outline-offset:1px}',
+      '.lcbk-bar-nome{font-size:12.5px;color:#172b4d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '.lcbk-bar-trilho{display:flex;height:12px;background:#f0f2f6;border-radius:3px;overflow:hidden}',
+      '.lcbk-bar-f{display:block;height:100%}',
+      '.lcbk-bar-f.is-claro{opacity:.35}',
+      '.lcbk-bar-num{font-size:13px;font-weight:700;color:#172b4d;font-variant-numeric:tabular-nums;min-width:34px;text-align:right}',
+      '.lcbk-bar-nota{grid-column:2 / 4;font-size:11px;color:#6b778c;margin-top:-2px}',
+      '.lcbk-dias{display:flex;align-items:flex-end;gap:3px;height:140px;padding-top:16px}',
+      '.lcbk-dia{flex:1 1 0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:8px;position:relative}',
+      '.lcbk-dia-bar{width:100%;max-width:22px;border-radius:3px 3px 0 0;opacity:.45}',
+      '.lcbk-dia.is-hoje .lcbk-dia-bar{opacity:1}',
+      '.lcbk-dia-v{font-size:11px;font-weight:700;color:#172b4d;margin-bottom:2px;font-variant-numeric:tabular-nums}',
+      '.lcbk-dia-d{font-size:10px;color:#8993a4;margin-top:3px}',
+      '.lcbk-dia.is-hoje .lcbk-dia-d{color:#172b4d;font-weight:700}',
+      '@media (max-width:1100px){.lcbk-viz-grid{grid-template-columns:1fr}}',
+      '.lcbk-painel-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:0 0 10px}',
+      '.lcbk-painel-head h2{margin:0;font-size:16px;font-weight:700;color:#1b2f5c}',
+      '.lcbk-painel-head span{font-size:12px;color:#6b778c}',
+      '.lcbk-kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:10px;margin:0 0 12px}',
+      '.lcbk-kpi{display:block;text-align:left;font-family:inherit;background:#fff;border:1px solid #e3e6ec;border-top:3px solid #3b6fd8;border-radius:10px;padding:10px 12px}',
+      'button.lcbk-kpi{cursor:pointer}',
+      'button.lcbk-kpi:hover{border-color:#3b6fd8}',
+      'button.lcbk-kpi:focus-visible,.lcbk-tab tbody tr:focus-visible{outline:2px solid #3b6fd8;outline-offset:2px}',
+      '.lcbk-kpi.is-alert{border-top-color:#c8372d}',
+      '.lcbk-kpi.is-warn{border-top-color:#d99a1e}',
+      '.lcbk-kpi.is-ok{border-top-color:#2e8b57}',
+      '.lcbk-kpi .l{font-size:12px;color:#5e6c84;font-weight:600}',
+      '.lcbk-kpi .v{font-size:26px;font-weight:700;color:#172b4d;line-height:1.2;margin-top:2px;font-variant-numeric:tabular-nums}',
+      '.lcbk-kpi.is-alert .v{color:#c8372d}',
+      '.lcbk-kpi .s{font-size:11.5px;color:#6b778c;margin-top:2px}',
+      '.lcbk-tabwrap{max-height:340px;overflow:auto;border:1px solid #e3e6ec;border-radius:10px;background:#fff}',
+      '.lcbk-tab{width:100%;border-collapse:collapse;font-size:12.5px}',
+      '.lcbk-tab th{position:sticky;top:0;background:#f4f6f9;text-align:left;font-weight:600;color:#404857;padding:8px 10px;border-bottom:1px solid #e3e6ec}',
+      '.lcbk-tab td{padding:7px 10px;border-bottom:1px solid #f0f2f5;color:#172b4d}',
+      '.lcbk-tab td.num{text-align:right;font-variant-numeric:tabular-nums}',
+      '.lcbk-tab td.is-late{color:#c8372d;font-weight:700}',
+      '.lcbk-tab tbody tr{cursor:pointer}',
+      '.lcbk-tab tbody tr:hover{background:#f7f9fc}',
+      '.lcbk-tab tbody tr.is-on{background:#e8eefb}',
+      '.lcbk-tab tbody tr.is-fila td{color:#6b778c;font-style:italic;cursor:default}',
+      '.lcbk-prod{margin-top:16px}',
+      '.lcbk-painel-head .lcbk-btn{margin-left:auto;padding:6px 10px}',
+      '.lcbk-painel-head span.is-err{color:#a1281f}',
+      '.lcbk-nota{font-size:11.5px;color:#6b778c;margin:8px 2px 0}',
       '.lcbk-mais{width:100%;margin-top:4px;background:#fff}',
       '.lcbk-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#404857;cursor:pointer}',
       '.lcbk-chip.is-area{background:#f1f2f5;color:#404857}',
@@ -1367,6 +1483,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       if (x.origin !== location.origin || !CFG.lista.padrao.test(x.pathname + x.search)) return;
       var b = baseDe(x.href);
       if (LC.carregando && b === LC.base) return;            // s\u00e3o as nossas pr\u00f3prias consultas
+      if (LC.carregando) LC.cancelar = true;                  // filtro mudou no meio da carga: para a antiga
       LC.url = x.href;
       if (LC.completo && LC.completo.base !== b) { LC.completo = null; LC.erro = ''; }  // filtro mudou
       LC.base = b;
@@ -1408,7 +1525,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       quem: ativo ? semDoc(respTxt.replace(/,\s*\+\d+\s*$/, '')) : '',
       fila: fila, mais: mais, prazoTxt: ativo ? prazoTxt : '', due: due, late: late,
       today: !late && !!(due && due.date && due.date.toDateString() === now.toDateString()),
-      ativo: ativo, status: status, fimEm: toDate(textoDeHtml(x.enddate)),
+      ativo: ativo, status: status, fimEm: toDate(textoDeHtml(x.enddate)), inicioEm: toDate(textoDeHtml(x.startdate)),
       tipo: tipo, stage: cl.etapa, area: cl.area
     };
   }
@@ -1421,6 +1538,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     LC.carregando = true; LC.cancelar = false; LC.erro = ''; LC.base = base; LC.parcial = itens;
     function fim(msg) {
       LC.carregando = false; LC.prog = ''; LC.parcial = null;
+      if (LC.cancelar) setTimeout(agendarAuto, 50);          // come\u00e7a a carga da lista nova
       if (msg) { LC.erro = msg; LC.completo = null; }
       else if (!LC.cancelar) {
         LC.completo = { base: base, itens: itens, em: new Date(), total: total,
@@ -1544,6 +1662,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     outras: ls('lcbKanbanOutras') === '1',
     ator: '',
     lim: {},
+    painel: ls('lcbKanbanPainel') !== '0',
     time: ['triagem', 'comercial', 'juridico'].indexOf(ls('lcbKanbanTime')) !== -1 ? ls('lcbKanbanTime') : '',
     totalConfirmado: '',
     busca: ''
@@ -1554,6 +1673,436 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function layoutInstAtivo() {
     return LAYOUTS_INST[stInst.layout] ? stInst.layout :
       (ESTEIRA_INST_PADRAO[ls('lcbKanbanArea')] || 'comercial');
+  }
+
+  // \u2550\u2550\u2550 PRODU\u00c7\u00c3O (LOG DE TAREFAS) \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+  // Uma tarefa finalizada hoje (ou no m\u00eas) pertence a uma solicita\u00e7\u00e3o EM ANDAMENTO ou ENCERRADA
+  // no per\u00edodo. Por isso o log \u00e9 pedido nesses dois recortes, fluxo a fluxo. Se um export vier com
+  // 1.000 linhas (corte silencioso do Zeev), o per\u00edodo da solicita\u00e7\u00e3o \u00e9 dividido at\u00e9 caber.
+  // Do CSV s\u00f3 ficam: n\u00ba, tarefa, ator, time, solicitante, datas e status. O resto \u00e9 descartado.
+  var PROD = { carregando: false, erro: '', em: null, dados: null, consultas: 0, incompleto: 0, prog: '' };
+  function ddmmaaaa(d) { return ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + '/' + d.getFullYear(); }
+  function lerData(txt) {
+    var m = clean(txt).match(/(\d{2})\/(\d{2})\/(\d{4})(?:\D+(\d{1,2}):(\d{2}))?/);
+    return m ? new Date(+m[3], +m[2] - 1, +m[1], m[4] ? +m[4] : 0, m[4] ? +m[5] : 0) : null;
+  }
+  function lerCsv(txt) {
+    var rows = [], row = [], f = '', q = false, c;
+    if (txt.charCodeAt(0) === 0xFEFF) txt = txt.slice(1);
+    for (var i = 0; i < txt.length; i++) {
+      c = txt[i];
+      if (q) {
+        if (c === '"') { if (txt[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c;
+      } else if (c === '"') q = true;
+      else if (c === ';') { row.push(f); f = ''; }
+      else if (c === '\n') { row.push(f); rows.push(row); row = []; f = ''; }
+      else if (c !== '\r') f += c;
+    }
+    if (f || row.length) { row.push(f); rows.push(row); }
+    return rows.filter(function (r) { return r.length > 1 || clean(r[0]); });
+  }
+  function decodificar(conteudo) {
+    var t = String(conteudo || '');
+    if (/^[A-Za-z0-9+\/=\s]+$/.test(t.slice(0, 400))) {
+      try { t = new TextDecoder('utf-8').decode(Uint8Array.from(atob(t.replace(/\s/g, '')), function (ch) { return ch.charCodeAt(0); })); }
+      catch (e) { /* n\u00e3o era base64 */ }
+    }
+    return t;
+  }
+  // baixa o log de um recorte; devolve s\u00f3 os campos necess\u00e1rios
+  function baixarLog(fluxo, flowStatus, ini, fim, extra) {
+    var q = 'reportType=ihavepermission&taskStatus=S&flowStatus=' + flowStatus +
+      '&codFlowsOrServices=' + encodeURIComponent(fluxo[0] + ';' + fluxo[1] + ';0;0') +
+      '&startBegin=' + encodeURIComponent(ddmmaaaa(ini)) + '&startEnd=' + encodeURIComponent(ddmmaaaa(fim)) + (extra || '');
+    PROD.consultas++;
+    return getJson('/api/internal/bpms/1.0/instances/export/tasks/csvsemicolon?' + q).then(function (j) {
+      var linhas = lerCsv(decodificar(j && j.success && j.success.fileContent));
+      if (!linhas.length) return { n: 0, itens: [] };
+      var h = linhas[0].map(clean), ix = function (nome) { return h.indexOf(nome); };
+      var I = { sol: ix('N\u00famero da solicita\u00e7\u00e3o'), tipo: ix('Tipo de solicita\u00e7\u00e3o'), solic: ix('Solicitante / Nome'),
+        tarefa: ix('Tarefa'), ator: ix('Ator / Nome'), time: ix('Ator / Time'), rec: ix('Data de recebimento'),
+        hrec: ix('Hor\u00e1rio de recebimento'), fin: ix('Data de finaliza\u00e7\u00e3o'), hfin: ix('Hor\u00e1rio de finaliza\u00e7\u00e3o'),
+        st: ix('Status da tarefa'), inst: ix('N\u00famero da inst\u00e2ncia da tarefa') };
+      var itens = linhas.slice(1).map(function (r) {
+        var g = function (k) { return I[k] >= 0 ? clean(r[I[k]]) : ''; };
+        return { sol: digits(g('sol')), papel: fluxo[2], solic: semDoc(g('solic')), cod: codigoDe(g('tarefa')),
+          ator: semDoc(g('ator')), time: g('time'), rec: lerData(g('rec') + ' ' + g('hrec')),
+          fin: lerData(g('fin') + ' ' + g('hfin')), st: g('st'), inst: g('inst') || (g('sol') + '|' + g('tarefa') + '|' + g('rec')) };
+      });
+      return { n: linhas.length - 1, itens: itens };
+    });
+  }
+  // divide o per\u00edodo da solicita\u00e7\u00e3o at\u00e9 cada parte vir abaixo do corte de 1.000 linhas
+  function baixarRecorte(fluxo, flowStatus, ini, fim, extra, acc) {
+    return baixarLog(fluxo, flowStatus, ini, fim, extra).then(function (res) {
+      if (res.n >= CFG.producao.limiteLinhas) {
+        var dias = Math.round((fim - ini) / DIA);
+        if (dias < 1) { PROD.incompleto++; res.itens.forEach(function (x) { acc.push(x); }); return; }
+        var meio = new Date(ini.getTime() + Math.floor(dias / 2) * DIA);
+        var depois = new Date(meio.getTime() + DIA);
+        return baixarRecorte(fluxo, flowStatus, ini, meio, extra, acc)
+          .then(function () { return baixarRecorte(fluxo, flowStatus, depois, fim, extra, acc); });
+      }
+      res.itens.forEach(function (x) { acc.push(x); });
+    });
+  }
+  function carregarProducao() {
+    if (PROD.carregando) return;
+    PROD.carregando = true; PROD.erro = ''; PROD.consultas = 0; PROD.incompleto = 0;
+    var hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    var mes1 = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+    var base = lerData(CFG.producao.inicioBase) || new Date(2020, 0, 1);
+    var acc = [];
+    var encMes = '&endBegin=' + encodeURIComponent(ddmmaaaa(mes1)) + '&endEnd=' + encodeURIComponent(ddmmaaaa(hoje));
+    var fila = [];
+    CFG.producao.fluxos.forEach(function (f) {
+      fila.push([f, 'S', '']);        // em andamento
+      fila.push([f, 'N', encMes]);    // encerradas no m\u00eas
+    });
+    var i = 0;
+    function proximo() {
+      if (i >= fila.length) return Promise.resolve();
+      var t = fila[i++];
+      PROD.prog = 'Lendo o log de tarefas (' + i + ' de ' + fila.length + ')\u2026';
+      if (typeof renderInst === 'function' && uiI.painel) renderInst();
+      return baixarRecorte(t[0], t[1], base, hoje, t[2], acc).then(proximo);
+    }
+    proximo().then(function () {
+      PROD.dados = calcularProducao(acc, hoje, mes1);
+      PROD.em = new Date();
+    }).catch(function (e) {
+      PROD.erro = 'n\u00e3o foi poss\u00edvel ler o log de tarefas (' + (e && e.message) + ')';
+    }).then(function () {
+      PROD.carregando = false; PROD.prog = '';
+      acc = null;                                             // descarta o log bruto
+      if (uiI.painel) renderInst();
+    });
+  }
+  function calcularProducao(acc, hoje, mes1) {
+    var amanha = new Date(hoje.getTime() + DIA);
+    var noDia = function (d) { return d && d >= hoje && d < amanha; };
+    var noMes = function (d) { return d && d >= mes1 && d < amanha; };
+    var P = CFG.producao;
+    // deduplica por inst\u00e2ncia da tarefa, preferindo a linha finalizada (regra da Torre)
+    var porInst = {};
+    acc.forEach(function (x) {
+      var k = x.inst, a = porInst[k];
+      if (!a || (!a.fin && x.fin)) porInst[k] = x;
+    });
+    var linhas = Object.keys(porInst).map(function (k) { return porInst[k]; });
+    var timeDoAtor = {};
+    linhas.forEach(function (x) { if (x.ator && x.time && !timeDoAtor[x.ator]) timeDoAtor[x.ator] = x.time; });
+    var pessoas = {};
+    var pessoa = function (nome, time) {
+      var p = pessoas[nome] || (pessoas[nome] = { nome: nome, time: '', hoje: 0, triHoje: 0, triMes: 0, comHoje: 0, comMes: 0, forHoje: 0, forMes: 0 });
+      if (!p.time) p.time = time || timeDoAtor[nome] || '';
+      return p;
+    };
+    var tot = { tarefasHoje: 0, triHoje: 0, triMes: 0, comHoje: 0, comMes: 0, forHoje: 0, forMes: 0 };
+    // produ\u00e7\u00e3o e triagem
+    linhas.forEach(function (x) {
+      if (!x.ator || !x.fin) return;
+      if (noDia(x.fin)) { pessoa(x.ator, x.time).hoje++; tot.tarefasHoje++; }
+      if (x.papel === 'pai' && x.cod === P.triagem) {
+        if (noDia(x.fin)) { pessoa(x.ator, x.time).triHoje++; tot.triHoje++; }
+        if (noMes(x.fin)) { pessoa(x.ator, x.time).triMes++; tot.triMes++; }
+      }
+    });
+    // fechamentos: por negocia\u00e7\u00e3o (Filho), atribu\u00eddos ao dono
+    var negs = {};
+    linhas.forEach(function (x) {
+      if (x.papel !== 'filho') return;
+      var n = negs[x.sol] || (negs[x.sol] = { solic: x.solic, t01: '', aceite: null, formal: null });
+      if (x.cod === 'T01' && x.ator && !n.t01) n.t01 = x.ator;
+      if (x.cod === P.aceite && x.rec && (!n.aceite || x.rec < n.aceite)) n.aceite = x.rec;
+      if (x.cod === P.formal && x.fin && (!n.formal || x.fin < n.formal)) n.formal = x.fin;
+    });
+    var ehSdr = function (nome) {
+      return P.sdr.some(function (s) { return lower(nome).indexOf(lower(s)) === 0; });
+    };
+    Object.keys(negs).forEach(function (k) {
+      var n = negs[k];
+      var dono = (!n.solic || ehSdr(n.solic)) && n.t01 ? n.t01 : n.solic;
+      if (!dono) dono = 'Sem dono identificado';
+      if (noDia(n.aceite)) { pessoa(dono).comHoje++; tot.comHoje++; }
+      if (noMes(n.aceite)) { pessoa(dono).comMes++; tot.comMes++; }
+      if (noDia(n.formal)) { pessoa(dono).forHoje++; tot.forHoje++; }
+      if (noMes(n.formal)) { pessoa(dono).forMes++; tot.forMes++; }
+    });
+    // s\u00e9ries do m\u00eas, dia a dia (triagens e aceites)
+    var dias = [];
+    for (var d = new Date(mes1); d < amanha; d = new Date(d.getTime() + DIA)) dias.push({ d: new Date(d), tri: 0, com: 0 });
+    var idx = function (dt) { return dt ? Math.floor((new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()) - mes1) / DIA) : -1; };
+    linhas.forEach(function (x) {
+      if (x.papel === 'pai' && x.cod === P.triagem && noMes(x.fin)) { var i = idx(x.fin); if (dias[i]) dias[i].tri++; }
+    });
+    Object.keys(negs).forEach(function (k) {
+      var n = negs[k]; if (noMes(n.aceite)) { var i = idx(n.aceite); if (dias[i]) dias[i].com++; }
+    });
+    return { tot: tot, dias: dias, pessoas: Object.keys(pessoas).map(function (k) { return pessoas[k]; }) };
+  }
+
+  function timeDoNome(t) {
+    t = lower(t);
+    return /tria/.test(t) ? 'triagem' : /jur/.test(t) ? 'juridico' : /comerc|vend/.test(t) ? 'comercial' : '';
+  }
+
+  // \u2550\u2550\u2550 VIS\u00c3O DO GESTOR \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+  // Painel do gestor: s\u00f3 em Monitorar > Solicita\u00e7\u00f5es E s\u00f3 para quem ativou a chave no navegador
+  // (link ?lcbGestor=on). Quem protege os DADOS \u00e9 a permiss\u00e3o de Monitorar do Zeev; a chave
+  // decide apenas quem v\u00ea o painel entre as pessoas que j\u00e1 t\u00eam essa permiss\u00e3o.
+  var EH_GESTOR = CFG.pathGestor.test(location.pathname) && ls(CFG.keys.gestor) === 'on';
+  function mesmoDia(d) { return !!(d && d.toDateString() === new Date().toDateString()); }
+  function kpi(rotulo, valor, sub, tom, onClick) {
+    var c = el(onClick ? 'button' : 'div', 'lcbk-kpi' + (tom ? ' is-' + tom : ''));
+    if (onClick) { c.type = 'button'; c.addEventListener('click', onClick); }
+    c.appendChild(el('div', 'l', rotulo));
+    c.appendChild(el('div', 'v', fmtN(valor)));
+    if (sub) c.appendChild(el('div', 's', sub));
+    return c;
+  }
+  var COR_TIME = { triagem: '#6a3fb5', comercial: '#1d5fbf', juridico: '#0f7a6c', '': '#7a8394' };
+  function vizBox(titulo, sub) {
+    var box = el('section', 'lcbk-viz');
+    var h = el('header', 'lcbk-viz-head');
+    h.appendChild(el('h3', null, titulo));
+    if (sub) h.appendChild(el('p', null, sub));
+    box.appendChild(h);
+    return box;
+  }
+  // barras horizontais: [{nome, a, b, cor, rotulo, nota, ativo, onClick}] (a = parte forte, b = parte clara)
+  function barras(box, linhas, vazio, maxLinhas) {
+    if (!linhas.length) { box.appendChild(el('p', 'lcbk-viz-vazio', vazio)); return box; }
+    var max = Math.max.apply(null, linhas.map(function (l) { return (l.a || 0) + (l.b || 0); })) || 1;
+    var ol = el('ol', 'lcbk-bars');
+    linhas.slice(0, maxLinhas || 10).forEach(function (l) {
+      var li = el('li', 'lcbk-bar' + (l.ativo ? ' is-on' : ''));
+      li.appendChild(el('span', 'lcbk-bar-nome', l.nome));
+      var tr = el('span', 'lcbk-bar-trilho');
+      var f1 = el('span', 'lcbk-bar-f'); f1.style.width = ((l.a || 0) * 100 / max) + '%'; f1.style.background = l.cor;
+      tr.appendChild(f1);
+      if (l.b) { var f2 = el('span', 'lcbk-bar-f is-claro'); f2.style.width = (l.b * 100 / max) + '%'; f2.style.background = l.cor; tr.appendChild(f2); }
+      li.appendChild(tr);
+      li.appendChild(el('span', 'lcbk-bar-num', l.rotulo != null ? l.rotulo : fmtN(l.a || 0)));
+      if (l.nota) li.appendChild(el('span', 'lcbk-bar-nota', l.nota));
+      if (l.onClick) {
+        li.tabIndex = 0; li.setAttribute('role', 'button');
+        li.addEventListener('click', l.onClick);
+        li.addEventListener('keydown', function (e) { if (e.key === 'Enter') l.onClick(); });
+      }
+      ol.appendChild(li);
+    });
+    box.appendChild(ol);
+    if (linhas.length > (maxLinhas || 10)) box.appendChild(el('p', 'lcbk-viz-mais', 'e mais ' + (linhas.length - (maxLinhas || 10)) + ' pessoas'));
+    return box;
+  }
+  // colunas por dia do m\u00eas, com o dia de hoje em destaque
+  function colunasDia(box, dias, campo, cor) {
+    var max = Math.max.apply(null, dias.map(function (x) { return x[campo]; })) || 1;
+    var g = el('div', 'lcbk-dias');
+    g.setAttribute('role', 'img');
+    g.setAttribute('aria-label', dias.map(function (x) { return x.d.getDate() + ': ' + x[campo]; }).join(', '));
+    dias.forEach(function (x, i) {
+      var hoje = i === dias.length - 1;
+      var c = el('div', 'lcbk-dia' + (hoje ? ' is-hoje' : ''));
+      c.title = fmtData(x.d) + ': ' + x[campo];
+      var bar = el('span', 'lcbk-dia-bar'); bar.style.height = Math.max(2, x[campo] * 100 / max) + '%'; bar.style.background = cor;
+      if (hoje || x[campo] === max) c.appendChild(el('span', 'lcbk-dia-v', fmtN(x[campo])));
+      c.appendChild(bar);
+      c.appendChild(el('span', 'lcbk-dia-d', String(x.d.getDate())));
+      g.appendChild(c);
+    });
+    box.appendChild(g);
+    return box;
+  }
+
+  function renderPainel(lidos, completo, total) {
+    var p = uiI.painel;
+    if (!EH_GESTOR || !stInst.painel || stInst.view !== 'kanban') { p.style.display = 'none'; return; }
+    p.style.display = '';
+    var ativos = lidos.filter(function (it) { return it.ativo; });
+    var de = function (t) { return ativos.filter(function (it) { return timeDe(it) === t; }); };
+    var tri = de('triagem'), com = de('comercial'), jur = de('juridico');
+    var d = PROD.dados;
+    var filtrar = function (time, layout) {
+      return function () {
+        stInst.time = time; stInst.ator = ''; ls('lcbKanbanTime', time);
+        if (layout) { stInst.layout = layout; ls(CFG.keys.layoutInst, layout); }
+        renderInst();
+        if (uiI.board.scrollIntoView) uiI.board.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      };
+    };
+    var frag = document.createDocumentFragment();
+
+    // cabe\u00e7alho
+    var head = el('div', 'lcbk-g-head');
+    var tt = el('div');
+    tt.appendChild(el('h2', null, 'Opera\u00e7\u00e3o agora'));
+    var base = completo ? 'Todas as ' + fmtN(lidos.length) + ' solicita\u00e7\u00f5es da lista'
+      : 'Carregando: ' + fmtN(lidos.length) + (total ? ' de ' + fmtN(total) : '') + ' solicita\u00e7\u00f5es';
+    var prodTxt = PROD.carregando ? PROD.prog : PROD.erro ? PROD.erro
+      : PROD.em ? 'produ\u00e7\u00e3o lida \u00e0s ' + PROD.em.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+    tt.appendChild(el('p', null, base + (prodTxt ? '. ' + prodTxt.charAt(0).toUpperCase() + prodTxt.slice(1) : '')));
+    head.appendChild(tt);
+    var bt = el('button', 'lcbk-btn', PROD.carregando ? 'Atualizando produ\u00e7\u00e3o\u2026' : 'Atualizar produ\u00e7\u00e3o');
+    bt.type = 'button'; bt.disabled = PROD.carregando;
+    bt.addEventListener('click', carregarProducao);
+    head.appendChild(bt);
+    frag.appendChild(head);
+    if (PROD.incompleto) frag.appendChild(el('p', 'lcbk-aviso', 'Parte do log veio cortada em 1.000 linhas mesmo num \u00fanico dia: produ\u00e7\u00e3o e fechamentos podem estar menores que o real.'));
+
+    // funil
+    var etapas = [
+      { n: tri.filter(function (it) { return it.fila; }).length, t: 'na fila da triagem', s: 'ningu\u00e9m assumiu', cor: '#8a6bd1', f: filtrar('triagem', 'status') },
+      { n: tri.filter(function (it) { return !it.fila; }).length, t: 'em an\u00e1lise na triagem', s: d ? fmtN(d.tot.triHoje) + ' analisadas hoje' : '', cor: COR_TIME.triagem, f: filtrar('triagem', 'status') },
+      { n: com.length, t: 'no comercial', s: com.filter(function (it) { return it.late; }).length + ' atrasadas', cor: COR_TIME.comercial, f: filtrar('comercial', 'comercial') },
+      { n: jur.length, t: 'no jur\u00eddico', s: jur.filter(function (it) { return it.late; }).length + ' atrasadas', cor: COR_TIME.juridico, f: filtrar('juridico', 'juridico') },
+      { n: d ? d.tot.comHoje : null, t: 'propostas aceitas hoje', s: d ? fmtN(d.tot.comMes) + ' no m\u00eas' : 'lendo o log\u2026', cor: '#2e7d4f' },
+      { n: d ? d.tot.forHoje : null, t: 'cess\u00f5es protocoladas hoje', s: d ? fmtN(d.tot.forMes) + ' no m\u00eas' : 'lendo o log\u2026', cor: '#1f5e3b' }
+    ];
+    var fun = el('div', 'lcbk-funil');
+    fun.setAttribute('role', 'list');
+    etapas.forEach(function (e, i) {
+      var b = el(e.f ? 'button' : 'div', 'lcbk-etapa' + (i === 0 ? ' is-primeira' : ''));
+      b.setAttribute('role', 'listitem');
+      b.style.setProperty('--c', e.cor);
+      if (e.f) { b.type = 'button'; b.addEventListener('click', e.f); b.title = 'Ver no quadro'; }
+      b.appendChild(el('span', 'n', e.n == null ? '\u2026' : fmtN(e.n)));
+      b.appendChild(el('span', 't', e.t));
+      if (e.s) b.appendChild(el('span', 's', e.s));
+      fun.appendChild(b);
+    });
+    frag.appendChild(fun);
+    var late = ativos.filter(function (it) { return it.late; }).length;
+    if (late) {
+      var al = el('button', 'lcbk-alerta');
+      al.type = 'button';
+      al.addEventListener('click', filtrar('', 'status'));
+      al.appendChild(el('strong', null, fmtN(late) + ' atrasadas'));
+      al.appendChild(document.createTextNode(' de ' + fmtN(ativos.length) + ' em andamento (' + Math.round(late * 100 / Math.max(ativos.length, 1)) + '%)'));
+      frag.appendChild(al);
+    }
+
+    // \u2500\u2500 cards por pessoa, agrupados por time \u2500\u2500
+    var verPessoa = function (nome) {
+      return function () {
+        stInst.ator = stInst.ator === nome ? '' : nome; renderInst();
+        if (stInst.ator && uiI.board.scrollIntoView) uiI.board.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      };
+    };
+    var gente = {};
+    var g = function (nome) {
+      return gente[nome] || (gente[nome] = { nome: nome, time: '', maos: 0, late: 0, antigo: null,
+        hoje: 0, triHoje: 0, triMes: 0, comHoje: 0, comMes: 0, forMes: 0 });
+    };
+    ativos.forEach(function (it) {
+      if (!it.quem || it.fila) return;
+      var r = g(it.quem);
+      r.maos++;
+      if (!r.time) r.time = timeDe(it);
+      if (it.late) {
+        r.late++;
+        if (it.due && it.due.date && (!r.antigo || it.due.date < r.antigo)) r.antigo = it.due.date;
+      }
+    });
+    if (d) d.pessoas.forEach(function (x) {
+      var r = g(x.nome);
+      ['hoje', 'triHoje', 'triMes', 'comHoje', 'comMes', 'forMes'].forEach(function (k) { r[k] = x[k]; });
+      var t = timeDoNome(x.time);
+      if (t) r.time = t;
+    });
+    var iniciais = function (n) {
+      var p2 = n.split(' ').filter(Boolean);
+      return ((p2[0] || '')[0] || '') + ((p2.length > 1 ? p2[p2.length - 1] : '')[0] || '');
+    };
+    var cartao = function (r, principal, rotulo, sub, extras) {
+      var c = el('button', 'lcbk-pc' + (stInst.ator === r.nome ? ' is-on' : '') + (r.late ? ' tem-atraso' : ''));
+      c.type = 'button';
+      c.style.setProperty('--c', COR_TIME[r.time] || COR_TIME['']);
+      c.title = 'Ver no quadro o que est\u00e1 com ' + r.nome;
+      c.addEventListener('click', verPessoa(r.nome));
+      var topo = el('div', 'lcbk-pc-topo');
+      topo.appendChild(el('span', 'lcbk-av', iniciais(r.nome).toUpperCase()));
+      topo.appendChild(el('span', 'lcbk-pc-nome', r.nome));
+      c.appendChild(topo);
+      var big = el('div', 'lcbk-pc-big');
+      big.appendChild(el('span', 'n', principal == null ? '\u2026' : fmtN(principal)));
+      big.appendChild(el('span', 'l', rotulo));
+      c.appendChild(big);
+      if (sub) c.appendChild(el('div', 'lcbk-pc-sub', sub));
+      var lin = el('div', 'lcbk-pc-lin');
+      extras.filter(function (e) { return e.n || e.sempre; }).forEach(function (e) {
+        var x = el('span', 'lcbk-pc-x' + (e.alerta ? ' is-alerta' : ''));
+        x.appendChild(el('strong', null, fmtN(e.n)));
+        x.appendChild(document.createTextNode(' ' + e.t));
+        lin.appendChild(x);
+      });
+      c.appendChild(lin);
+      if (r.antigo) {
+        var dd = Math.floor((Date.now() - r.antigo.getTime()) / DIA);
+        c.appendChild(el('div', 'lcbk-pc-alerta', 'Atraso mais antigo: ' + dd + (dd === 1 ? ' dia' : ' dias')));
+      }
+      return c;
+    };
+    var todosG = Object.keys(gente).map(function (k) { return gente[k]; });
+    var secao = function (time, titulo, chips, ordem, montar) {
+      if (stInst.time && stInst.time !== time) return;
+      var lista = todosG.filter(function (r) { return r.time === time; }).sort(ordem);
+      var sec = el('section', 'lcbk-time-sec');
+      sec.style.setProperty('--c', COR_TIME[time]);
+      var h = el('header', 'lcbk-time-head');
+      h.appendChild(el('h3', null, titulo));
+      chips.forEach(function (ch) { h.appendChild(el('span', 'lcbk-chip-t' + (ch.alerta ? ' is-alerta' : ''), ch.t)); });
+      sec.appendChild(h);
+      var grade = el('div', 'lcbk-pc-grade');
+      if (!lista.length) grade.appendChild(el('p', 'lcbk-viz-vazio', d ? 'Ningu\u00e9m com atividade neste time agora.' : 'Lendo o log de tarefas\u2026'));
+      lista.forEach(function (r) { grade.appendChild(montar(r)); });
+      sec.appendChild(grade);
+      frag.appendChild(sec);
+    };
+    var somaG = function (time, k) { return todosG.filter(function (r) { return r.time === time; }).reduce(function (a, r) { return a + r[k]; }, 0); };
+    var plural = function (n, um, varios) { return fmtN(n) + ' ' + (n === 1 ? um : varios); };
+
+    secao('comercial', 'Comercial', [
+      { t: d ? plural(d.tot.comMes, 'proposta aceita no m\u00eas', 'propostas aceitas no m\u00eas') : 'lendo o log\u2026' },
+      { t: d ? plural(d.tot.forMes, 'cess\u00e3o protocolada', 'cess\u00f5es protocoladas') : '' },
+      { t: plural(somaG('comercial', 'late'), 'atrasada', 'atrasadas'), alerta: somaG('comercial', 'late') > 0 }
+    ].filter(function (x) { return x.t; }), function (a, b) { return b.comMes - a.comMes || b.maos - a.maos; }, function (r) {
+      return cartao(r, d ? r.comMes : null, 'propostas aceitas no m\u00eas', d ? plural(r.comHoje, 'hoje', 'hoje') : '', [
+        { n: r.forMes, t: r.forMes === 1 ? 'cess\u00e3o' : 'cess\u00f5es' },
+        { n: r.maos, t: 'em m\u00e3os', sempre: true },
+        { n: r.late, t: r.late === 1 ? 'atrasada' : 'atrasadas', alerta: r.late > 0 }
+      ]);
+    });
+    secao('triagem', 'Triagem', [
+      { t: d ? plural(d.tot.triHoje, 'triagem hoje', 'triagens hoje') : 'lendo o log\u2026' },
+      { t: d ? plural(d.tot.triMes, 'no m\u00eas', 'no m\u00eas') : '' },
+      { t: plural(tri.filter(function (it) { return it.fila; }).length, 'na fila', 'na fila') }
+    ].filter(function (x) { return x.t; }), function (a, b) { return b.triHoje - a.triHoje || b.triMes - a.triMes; }, function (r) {
+      return cartao(r, d ? r.triHoje : null, 'triagens hoje', d ? plural(r.triMes, 'no m\u00eas', 'no m\u00eas') : '', [
+        { n: r.maos, t: 'em m\u00e3os', sempre: true },
+        { n: r.late, t: r.late === 1 ? 'atrasada' : 'atrasadas', alerta: r.late > 0 }
+      ]);
+    });
+    secao('juridico', 'Jur\u00eddico', [
+      { t: d ? plural(somaG('juridico', 'hoje'), 'tarefa conclu\u00edda hoje', 'tarefas conclu\u00eddas hoje') : 'lendo o log\u2026' },
+      { t: plural(somaG('juridico', 'late'), 'atrasada', 'atrasadas'), alerta: somaG('juridico', 'late') > 0 }
+    ].filter(function (x) { return x.t; }), function (a, b) { return b.late - a.late || b.hoje - a.hoje; }, function (r) {
+      return cartao(r, d ? r.hoje : null, 'tarefas conclu\u00eddas hoje', '', [
+        { n: r.maos, t: 'em m\u00e3os', sempre: true },
+        { n: r.late, t: r.late === 1 ? 'atrasada' : 'atrasadas', alerta: r.late > 0 }
+      ]);
+    });
+
+    // triagens por dia (cart\u00e3o largo)
+    if (d && (!stInst.time || stInst.time === 'triagem')) {
+      var b4 = vizBox('Triagens por dia', fmtN(d.tot.triMes) + ' no m\u00eas; hoje em destaque');
+      b4.className = 'lcbk-viz lcbk-viz-larga';
+      colunasDia(b4, d.dias, 'tri', COR_TIME.triagem);
+      frag.appendChild(b4);
+    }
+    frag.appendChild(el('p', 'lcbk-nota', 'Mesmas regras da Torre: triagem = T01 do Pai finalizada; proposta aceita = negocia\u00e7\u00e3o entrou na T07; cess\u00e3o protocolada = T24 finalizada. O vendedor \u00e9 o solicitante da negocia\u00e7\u00e3o (quando \u00e9 a SDR, quem fez a T01-Negociar Compra).'));
+    p.replaceChildren(frag);
   }
 
   function renderInst() {
@@ -1700,7 +2249,12 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       box.appendChild(b);
     });
     uiI.resumo.replaceChildren(box);
-    uiI.resumo.style.display = stInst.view === 'kanban' && lista.length ? '' : 'none';
+    uiI.resumo.style.display = stInst.view === 'kanban' && lista.length && !(EH_GESTOR && stInst.painel) ? '' : 'none';
+    renderPainel(lidos, completo, totalZeev());
+    if (uiI.btnPainel) {
+      uiI.btnPainel.style.display = EH_GESTOR && stInst.view === 'kanban' ? '' : 'none';
+      uiI.btnPainel.textContent = stInst.painel ? 'Ocultar painel do gestor' : 'Mostrar painel do gestor';
+    }
 
     var total = totalZeev();
     var parcial = total && total > lidos.length && !(completo && !LC.completo.limitado);
@@ -1824,6 +2378,12 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       carregarTudo();
     });
     uiI.tools.appendChild(uiI.btnTudo);
+    uiI.btnPainel = el('button', 'lcbk-btn');
+    uiI.btnPainel.type = 'button';
+    uiI.btnPainel.addEventListener('click', function () {
+      stInst.painel = !stInst.painel; ls('lcbKanbanPainel', stInst.painel ? '1' : '0'); renderInst();
+    });
+    uiI.tools.appendChild(uiI.btnPainel);
     uiI.btnAtual = el('button', 'lcbk-btn', 'Atualizar');
     uiI.btnAtual.type = 'button';
     uiI.btnAtual.title = 'Buscar de novo todas as p\u00e1ginas';
@@ -1836,8 +2396,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     uiI.aviso = el('p', 'lcbk-aviso');
     uiI.aviso.setAttribute('role', 'status');
     uiI.resumo = el('div');
+    uiI.painel = el('section', 'lcbk-painel');
+    uiI.painel.setAttribute('aria-label', 'Vis\u00e3o do gestor');
     uiI.board = el('div', 'lcbk-board');
     container.parentNode.insertBefore(uiI.bar, container);
+    container.parentNode.insertBefore(uiI.painel, container);
     container.parentNode.insertBefore(uiI.aviso, container);
     container.parentNode.insertBefore(uiI.resumo, container);
     container.parentNode.insertBefore(uiI.board, container.nextSibling);
@@ -1889,6 +2452,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       if (x.origin !== location.origin || !PADRAO_TAREFAS.test(x.pathname + x.search)) return;
       var b = baseTarefas(x.href);
       if (LT.carregando && b === LT.base) return;              // nossas pr\u00f3prias consultas
+      if (LT.carregando) LT.cancelar = true;
       LT.url = x.href;
       if (LT.base !== b) { LT.completo = null; LT.erro = ''; LT.cont = null; }
       LT.base = b;
@@ -1945,6 +2509,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     LT.carregando = true; LT.cancelar = false; LT.erro = ''; LT.base = base; LT.parcial = itens;
     function fim(msg) {
       LT.carregando = false; LT.prog = ''; LT.parcial = null;
+      if (LT.cancelar) setTimeout(autoTarefas, 50);
       if (msg) { LT.erro = msg; LT.completo = null; }
       else if (!LT.cancelar) {
         LT.completo = { base: base, itens: itens, em: new Date(),
@@ -1974,7 +2539,18 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     proxima();
   }
 
+  var prodIniciada = false;
+  function iniciarProducao() {
+    if (prodIniciada || !EH_GESTOR) return;
+    prodIniciada = true;
+    setTimeout(carregarProducao, 1500);
+    setInterval(function () {
+      if (document.visibilityState === 'visible' && stInst.painel) carregarProducao();
+    }, CFG.producao.atualizarMin * 60000);
+  }
+
   function bootInst(tries) {
+    if (tries === 0) iniciarProducao();
     if (tries === 0) vigiarConsultas();
     var t = tabelaInst();
     if (!t) {
@@ -1987,7 +2563,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     new MutationObserver(function (recs) {
       for (var i = 0; i < recs.length; i++) {
         var x = recs[i].target;
-        if (!uiI.board.contains(x) && !uiI.bar.contains(x) && !uiI.resumo.contains(x) && !uiI.aviso.contains(x)) {
+        if (!uiI.board.contains(x) && !uiI.bar.contains(x) && !uiI.resumo.contains(x) && !uiI.aviso.contains(x) &&
+            !uiI.painel.contains(x)) {
           clearTimeout(timerI);
           timerI = setTimeout(renderInst, 150);
           return;
