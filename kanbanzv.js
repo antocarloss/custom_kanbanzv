@@ -323,6 +323,13 @@
     try { new MutationObserver(agendar).observe(document.body, { childList: true, subtree: true }); } catch (e) {}
   })();
 
+  // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
+  var VERSAO = '2026-10-21';
+  if (ls('lcbKanbanVersao') !== VERSAO) {
+    if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
+    ls('lcbKanbanVersao', VERSAO);
+  }
+
   var flag = ls(CFG.keys.flag);
   if (flag === 'off' || (CFG.pilot && flag !== 'on')) return;
   var MODO = CFG.path.test(location.pathname) ? 'tarefas' :
@@ -623,80 +630,37 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   // \u2550\u2550\u2550 DISPOSI\u00c7\u00d5ES \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
   var comVoce = function (it) { return it.kind === 'tarefa' || it.kind === 'comigoExt'; };
 
+  // Executar tarefas: o quadro mostra S\u00d3 as tarefas da pessoa. Nas esteiras, cada tarefa vai
+  // para a coluna da etapa em que est\u00e1 (mapa de atividades). Sem colunas que dependem de dados
+  // que n\u00e3o existem (dono do lead), para n\u00e3o mostrar coluna vazia com aviso.
+  function esteiraTarefas(id, nome) {
+    return {
+      nome: nome,
+      cols: function () {
+        return colunasEsteira(id).map(function (c) { c.precisaB = false; return c; })
+          .concat([{ id: 'outros', name: 'Outras etapas', opcional: true }]);
+      },
+      place: function (it) { return comVoce(it) ? colunaDe(id, it) : null; }
+    };
+  }
   var LAYOUTS = {
     status: {
       nome: 'Por status',
       cols: function () {
-        return [
-          { id: 'backlog', name: 'Backlog' },
-          { id: 'andamento', name: 'Em andamento', precisaB: true, dica: 'Seus leads com participantes' },
-          { id: 'fechadas', name: 'Fechadas', precisaB: true, ok: true },
-          { id: 'atrasadas', name: 'Atrasadas', alert: true }
-        ];
+        var c = [{ id: 'backlog', name: 'No prazo' }];
+        if (B.status !== 'off') c.push({ id: 'andamento', name: 'Em andamento', precisaB: true, dica: 'Seus leads com participantes' },
+                                       { id: 'fechadas', name: 'Fechadas', precisaB: true, ok: true });
+        c.push({ id: 'atrasadas', name: 'Atrasadas', alert: true });
+        return c;
       },
       place: function (it) {
         if (comVoce(it)) return it.late ? 'atrasadas' : 'backlog';
         return it.finalizado ? 'fechadas' : 'andamento';
       }
     },
-    negociacao: {
-      nome: 'Esteira comercial',
-      cols: function () {
-        return [{ id: 'backlog', name: 'Backlog' }]
-          .concat(colunasEsteira('comercial'))
-          .concat([{ id: 'outros', name: 'Outras etapas', opcional: true },
-                   { id: 'fechadas', name: 'Fechadas', precisaB: true, ok: true }]);
-      },
-      place: function (it) {
-        if (comVoce(it)) return 'backlog';
-        if (!it.meuNeg) return null;
-        if (it.finalizado) return 'fechadas';
-        return colunaDe('comercial', it);
-      }
-    },
-    juridico: {
-      nome: 'Esteira jur\u00eddica',
-      cols: function () {
-        return colunasEsteira('juridico').map(function (c) { c.precisaB = false; return c; })
-          .concat([{ id: 'outros', name: 'Outras \u00e1reas', opcional: true }]);
-      },
-      place: function (it) {
-        if (!comVoce(it)) return null;              // aqui s\u00f3 entram as tarefas da pessoa
-        return colunaDe('juridico', it);
-      }
-    },
-    triagem: {
-      nome: 'Esteira de triagem',
-      cols: function () {
-        return [
-          { id: 'backlog', name: 'Backlog' },
-          { id: 'aguardando', name: 'Aguardando no Pai', precisaB: true },
-          { id: 'encaminhado', name: 'Em negocia\u00e7\u00e3o', precisaB: true, dica: 'J\u00e1 na esteira de negocia\u00e7\u00e3o' },
-          { id: 'encerrados', name: 'Encerrados', precisaB: true, ok: true }
-        ];
-      },
-      place: function (it) {
-        if (comVoce(it)) return 'backlog';
-        if (!it.meuTri) return null;
-        if (it.finalizado) return 'encerrados';
-        return it.tipo !== 'pai' ? 'encaminhado' : 'aguardando';
-      }
-    },
-    equipe: {
-      nome: 'Vis\u00e3o da equipe',
-      restrito: true,
-      cols: function () {
-        return [{ id: 'triagem', name: 'Triagem', precisaB: true }]
-          .concat(colunasEsteira('comercial'))
-          .concat([{ id: 'outros', name: 'Outras etapas', opcional: true },
-                   { id: 'fechadas', name: 'Fechadas', precisaB: true, ok: true }]);
-      },
-      place: function (it) {
-        if (it.finalizado) return 'fechadas';
-        if (it.tipo !== 'filho' || it.area === 'triagem') return 'triagem';
-        return colunaDe('comercial', it);
-      }
-    }
+    negociacao: esteiraTarefas('comercial', 'Esteira comercial'),
+    juridico: esteiraTarefas('juridico', 'Esteira jur\u00eddica'),
+    triagem: esteiraTarefas('triagem', 'Esteira de triagem')
   };
   var ESTEIRA_PARA_LAYOUT = { comercial: 'negociacao', juridico: 'juridico', triagem: 'triagem' };
   function layoutAtivo() {
@@ -926,7 +890,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var totT = cont ? cont.filtered : totalZeev();
     var limitadoT = completoT && LT.completo.limitado;
     var parcialT = !!(totT && totT > tarefas.length && !(completoT && !limitadoT));
-    var backlogTotal = layoutId === 'negociacao' || layoutId === 'triagem';   // Backlog = todas as tarefas da pessoa
+    var backlogTotal = false;
     // Na disposi\u00e7\u00e3o Por status, Backlog = no prazo e Atrasadas = fora do prazo: a contagem do Zeev d\u00e1 os dois exatos.
     var statusExato = layoutId === 'status' && cont && parcialT && !q;
 
@@ -991,7 +955,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       'Carregar todas (' + fmtN(Math.min(totT || 0, CFG.lista.maxItens)) + ')';
     if (LT.carregando) ui.btnTudo.textContent = LT.prog + ' Cancelar';
     ui.btnAtual.style.display = completoT && !LT.carregando && state.view === 'kanban' ? '' : 'none';
-    ui.status.textContent = st + (ocultos ? (st ? ' | ' : '') + ocultos + ' oculto(s) pelo filtro' : '');
+    ui.status.textContent = st + (ocultos ? (st ? ' | ' : '') + ocultos + ' oculto(s) pelo filtro' : '') + ' | Kanban ' + VERSAO;
     document.documentElement.classList.toggle('lcbk-on', state.view === 'kanban');
     syncBar();
   }
@@ -2286,7 +2250,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     uiI.status.textContent = origem +
       (stInst.ator ? ' | filtrando: ' + stInst.ator + ' (' + itens.length + ')' : '') +
       (foraDaArea ? ' | ' + foraDaArea + ' em outras \u00e1reas' : '') +
-      (foraDoTime ? ' | ' + foraDoTime + ' de outros times' : '') +
+      (foraDoTime ? ' | ' + foraDoTime + ' de outros times' : '') + ' | Kanban ' + VERSAO +
       (ocultos ? ' | ' + ocultos + ' oculto(s) pela busca' : '');
     document.documentElement.classList.toggle('lcbk-on', stInst.view === 'kanban');
     $$('.lcbk-seg', uiI.bar).forEach(function (b) {
