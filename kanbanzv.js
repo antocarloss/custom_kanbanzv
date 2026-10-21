@@ -50,7 +50,10 @@
       autoAte: 25000,        // carrega sozinho at\u00e9 esse total (acima, s\u00f3 com o bot\u00e3o)
       maxItens: 25000,       // teto absoluto por carga
       tamanhoPagina: 500,    // pede p\u00e1ginas grandes; se o Zeev limitar, o script se ajusta
-      cardsPorColuna: 100    // desenha at\u00e9 isso por coluna ("Mostrar mais" para o resto); contagens s\u00e3o do total
+      cardsPorColuna: 100,   // desenha at\u00e9 isso por coluna ("Mostrar mais" para o resto); contagens s\u00e3o do total
+      atualizarMin: 2,       // rel\u00ea a lista completa sozinho a cada X min (aba vis\u00edvel), sem piscar a tela
+      atualizarMinGrande: 10,// ... e a cada Y min quando a lista passa de 2.000 itens (protege o Zeev)
+      grande: 2000
     },
     inst: {
       cell: 'td.instance-cell',
@@ -1243,6 +1246,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function schedule() { clearTimeout(timer); timer = setTimeout(render, 150); }
 
   function boot(tries) {
+    if (tries === 0) vigiarAtualizacao();
     if (tries === 0) vigiarConsultas();
     var table = document.querySelector(CFG.sel.table);
     var root = document.querySelector(CFG.sel.root) || (table && table.parentNode);
@@ -1450,6 +1454,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       if (LC.carregando) LC.cancelar = true;                  // filtro mudou no meio da carga: para a antiga
       LC.url = x.href;
       if (LC.completo && LC.completo.base !== b) { LC.completo = null; LC.erro = ''; }  // filtro mudou
+      else if (LC.completo && !LC.carregando && velho(LC.completo)) setTimeout(carregarTudo, 300);
       LC.base = b;
       agendarAuto();
       if (uiI.board) { clearTimeout(timerI); timerI = setTimeout(renderInst, 150); }
@@ -1539,6 +1544,27 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       if (!LC.completo && !LC.carregando && !LC.erro && LC.url && total && total <= CFG.lista.autoAte) carregarTudo();
     }, 400);
   }
+  // \u2500\u2500 atualiza\u00e7\u00e3o autom\u00e1tica: rel\u00ea a lista completa em segundo plano quando ela fica velha.
+  // Os cards antigos continuam na tela at\u00e9 a nova leitura terminar (troca sem piscar).
+  function velho(completo) {
+    if (!completo) return false;
+    var min = completo.itens.length > CFG.lista.grande ? CFG.lista.atualizarMinGrande : CFG.lista.atualizarMin;
+    return Date.now() - completo.em.getTime() > min * 60000;
+  }
+  function vigiarAtualizacao() {
+    var checar = function () {
+      if (document.visibilityState !== 'visible') return;
+      if (MODO === 'tarefas') {
+        if (!LT.carregando && LT.completo && LT.completo.base === LT.base && velho(LT.completo)) { buscarContagem(); carregarTarefas(); }
+      } else if (!LC.carregando && LC.completo && LC.completo.base === LC.base && velho(LC.completo)) {
+        carregarTudo();
+      }
+    };
+    setInterval(checar, 30000);
+    document.addEventListener('visibilitychange', checar);
+    return checar;
+  }
+
   function itensDaLista() {
     if (LC.completo && LC.completo.base === LC.base) return LC.completo.itens.slice();
     if (LC.carregando && LC.parcial && LC.parcial.length) return LC.parcial.slice();   // vai preenchendo
@@ -2419,6 +2445,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       if (LT.carregando) LT.cancelar = true;
       LT.url = x.href;
       if (LT.base !== b) { LT.completo = null; LT.erro = ''; LT.cont = null; }
+      else if (LT.completo && !LT.carregando && velho(LT.completo)) setTimeout(carregarTarefas, 300);
       LT.base = b;
       clearTimeout(tCont); tCont = setTimeout(buscarContagem, 300);
       clearTimeout(tAutoT); tAutoT = setTimeout(autoTarefas, 900);
@@ -2514,6 +2541,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
 
   function bootInst(tries) {
+    if (tries === 0) vigiarAtualizacao();
     if (tries === 0) iniciarProducao();
     if (tries === 0) vigiarConsultas();
     var t = tabelaInst();
