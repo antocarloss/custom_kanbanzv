@@ -1314,6 +1314,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-gaveta-tit{flex:1;font-size:13px;color:#404857;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       '.lcbk-gaveta .lcbk-btn{text-decoration:none}',
       '.lcbk-gaveta-frame{flex:1;width:100%;border:0;background:#fff;border-radius:0 0 12px 12px}',
+      '.lcbk-busca-vazia{grid-column:1 / -1;font-size:13px;color:#404857;background:#fff;border:1px dashed #c9cfda;border-radius:10px;padding:18px;margin:0}',
+      '.lcbk-comigo.is-on{background:#1b2f5c;color:#fff;border-color:#1b2f5c}',
       '.lcbk-mais{width:100%;margin-top:4px;background:#fff}',
       '.lcbk-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#404857;cursor:pointer}',
       '.lcbk-chip.is-area{background:#f1f2f5;color:#404857}',
@@ -1662,10 +1664,54 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     try { var x = new URL(u, location.origin); x.searchParams.delete('pagenumber'); x.searchParams.delete('recordsperpage'); return x.href; }
     catch (e) { return ''; }
   }
+  // \u2500\u2500 Busca no pr\u00f3prio Zeev: usa a Palavra-chave da lista (mesma permiss\u00e3o da pessoa),
+  //    para achar leads que ainda n\u00e3o foram carregados ou que est\u00e3o fora do recorte.
+  var LB = { q: '', itens: [], carregando: false, erro: '', urls: {} }, tBusca;
+  function buscarNoZeev(q) {
+    clearTimeout(tBusca);
+    if (!q || q.length < 3 || !LC.url) { LB.q = ''; LB.itens = []; LB.carregando = false; return; }
+    tBusca = setTimeout(function () {
+      var u = new URL(LC.url);
+      u.searchParams.set('pagenumber', '1');
+      u.searchParams.set('recordsperpage', '100');
+      u.searchParams.set('keyword', q);
+      LB.urls[u.href] = 1;
+      LB.q = q; LB.carregando = true; LB.erro = '';
+      renderInst();
+      getJson(u.href).then(function (j) {
+        if (LB.q !== q) return;
+        LB.itens = (((j && j.success) || {}).itens || []).map(function (x) { var it = daApi(x); it._busca = true; return it; });
+      }).catch(function (e) {
+        if (LB.q === q) { LB.itens = []; LB.erro = (e && e.message) || 'erro'; }
+      }).then(function () {
+        if (LB.q === q) { LB.carregando = false; renderInst(); }
+      });
+    }, 500);
+  }
+  // \u2500\u2500 "Comigo": solicita\u00e7\u00f5es em que a pessoa tem tarefa aberta agora (lista de tarefas dela)
+  var MEU = { nums: null, em: null, carregando: false, erro: '' };
+  function carregarMinhas() {
+    if (MEU.carregando) return;
+    MEU.carregando = true; MEU.erro = '';
+    var nums = {}, p = 1;
+    function prox() {
+      return getJson('/api/internal/bpms/1.0/assignments?sortfield=dt&sortdirection=ASC&pageNumber=' + p + '&recordsPerPage=500')
+        .then(function (j) {
+          var sx = j && j.success, lote = (sx && sx.itens) || [];
+          lote.forEach(function (x) { var n = digits(x.cfe); if (n) nums[n] = 1; });
+          if (sx && sx.hasmoreitens && lote.length && p < 20) { p++; return prox(); }
+        });
+    }
+    prox().then(function () { MEU.nums = nums; MEU.em = new Date(); })
+      .catch(function (e) { MEU.erro = (e && e.message) || 'erro'; })
+      .then(function () { MEU.carregando = false; renderInst(); });
+  }
+
   function registrarUrl(u) {
     try {
       var x = new URL(u, location.origin);
       if (x.origin !== location.origin || !CFG.lista.padrao.test(x.pathname + x.search)) return;
+      if (LB.urls[x.href]) return;                           // nossas buscas por palavra-chave
       var b = baseDe(x.href);
       if (LC.carregando && b === LC.base) return;            // s\u00e3o as nossas pr\u00f3prias consultas
       if (LC.carregando) LC.cancelar = true;                  // filtro mudou no meio da carga: para a antiga
@@ -1876,6 +1922,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     layout: LAYOUTS_INST[ls(CFG.keys.layoutInst)] ? ls(CFG.keys.layoutInst) : '',   // vazio = autom\u00e1tico
     outras: ls('lcbKanbanOutras') === '1',
     ator: '',
+    comigo: false,
     lim: {},
     painel: ls('lcbKanbanPainel') !== '0',
     time: ['triagem', 'comercial', 'juridico'].indexOf(ls('lcbKanbanTime')) !== -1 ? ls('lcbKanbanTime') : '',
@@ -2329,7 +2376,16 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     // O resumo por pessoa e o filtro "Com quem" seguem a esteira escolhida: na Esteira jur\u00eddica,
     // s\u00f3 entram processos em etapas do jur\u00eddico (a menos que "Mostrar outras \u00e1reas" esteja marcado).
     var foraDaArea = 0, foraDoTime = 0;
+    var buscando = !!stInst.busca;
+    if (buscando && LB.q === stInst.busca && LB.itens.length) {       // junta o que o Zeev achou
+      var ja = {};
+      lidos.forEach(function (it) { ja[it.num] = 1; });
+      LB.itens.forEach(function (it) { if (!ja[it.num]) lidos.push(it); });
+    }
+    if (stInst.comigo && MEU.nums) lidos = lidos.filter(function (it) { return MEU.nums[it.num]; });
+    var semRecorte = buscando || stInst.comigo;                        // busca e "Comigo" ignoram esteira/time/pessoa
     var todos = lidos.filter(function (it) {
+      if (semRecorte) return true;
       if (L.esteira && !stInst.outras && L.place(it) === 'outros') { foraDaArea++; return false; }
       if (stInst.time && timeDe(it) !== stInst.time && !(timeDe(it) === 'filho' && stInst.time !== 'triagem')) {
         foraDoTime++;
@@ -2350,17 +2406,20 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       a.times[tm] = (a.times[tm] || 0) + 1;
     });
     if (stInst.ator && !atores[stInst.ator]) stInst.ator = '';
-    var itens = stInst.ator ? todos.filter(function (it) { return chaveAtor(it) === stInst.ator; }) : todos;
-    var cols = L.cols(), buckets = {}, q = stInst.busca.toLowerCase(), ocultos = 0;
+    var itens = stInst.ator && !semRecorte ? todos.filter(function (it) { return chaveAtor(it) === stInst.ator; }) : todos;
+    var cols = L.cols(), buckets = {}, q = stInst.busca.toLowerCase(), ocultos = 0, achados = 0;
     cols.forEach(function (c) { buckets[c.id] = []; });
     itens.forEach(function (it) {
       var col = L.place(it);
       if (!buckets[col]) return;
       var cpfI = (it.info || {}).cpf ? it.info.cpf + ' ' + it.info.cpf.replace(/\D/g, '') : '';
-      if (q && [it.numero, it.titulo, it.processo, it.atividade, it.quem, (it.info || {}).procNum, cpfI].join(' ').toLowerCase().indexOf(q) === -1) {
+      var texto = [it.numero, it.titulo, it.processo, it.atividade, it.quem, (it.info || {}).procNum, cpfI].join(' ').toLowerCase();
+      var qd = q.replace(/\D/g, '');
+      if (q && !it._busca && texto.indexOf(q) === -1 && !(qd.length >= 4 && texto.replace(/\D/g, ' ').indexOf(qd) !== -1)) {
         ocultos++;
         return;
       }
+      if (q) achados++;
       buckets[col].push(it);
     });
     // Se TODOS os carregados ca\u00edram numa \u00fanica coluna, o total do Zeev PODE ser o total dela,
@@ -2377,6 +2436,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     cols.forEach(function (c) {
       var list = buckets[c.id];
       if (c.opcional && !list.length) return;
+      if (semRecorte && !list.length) return;                          // na busca e no "Comigo", s\u00f3 colunas com cards
       var sec = el('section', 'lcbk-col' + (c.alert ? ' is-alert' : '') + (c.ok ? ' is-ok' : ''));
       var head = el('header', 'lcbk-head');
       var h = el('div');
@@ -2420,7 +2480,20 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       frag.appendChild(sec);
     });
     uiI.board.replaceChildren(frag);
-    uiI.board.style.setProperty('--lcbk-cols', String(uiI.board.children.length));
+    if (buscando && !achados) {
+      uiI.board.appendChild(el('p', 'lcbk-busca-vazia', LB.carregando && LB.q === stInst.busca
+        ? 'Procurando "' + stInst.busca + '" em todas as solicita\u00e7\u00f5es que voc\u00ea pode ver no Zeev\u2026'
+        : 'Nada encontrado para "' + stInst.busca + '". Confira a grafia, ou procure pelo n\u00famero da solicita\u00e7\u00e3o, CPF ou n\u00famero do processo.'));
+    } else if (stInst.comigo && MEU.carregando && !MEU.nums) {
+      uiI.board.appendChild(el('p', 'lcbk-busca-vazia', 'Buscando as suas tarefas abertas\u2026'));
+    } else if (stInst.comigo && !uiI.board.children.length) {
+      uiI.board.appendChild(el('p', 'lcbk-busca-vazia', MEU.erro ? 'N\u00e3o foi poss\u00edvel ler as suas tarefas abertas.'
+        : 'Nenhuma solicita\u00e7\u00e3o desta lista est\u00e1 com voc\u00ea agora.'));
+    }
+    uiI.board.style.setProperty('--lcbk-cols', String(uiI.board.children.length || 1));
+    uiI.btnComigo.classList.toggle('is-on', stInst.comigo);
+    uiI.btnComigo.setAttribute('aria-pressed', stInst.comigo ? 'true' : 'false');
+    uiI.btnComigo.textContent = stInst.comigo && !MEU.nums ? 'Comigo\u2026' : 'Comigo';
 
     // Filtro e resumo por ator (quem est\u00e1 com a atividade atual)
     var lista = Object.keys(atores).map(function (k) { return atores[k]; })
@@ -2502,7 +2575,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     uiI.status.textContent = origem +
       (stInst.ator ? ' | filtrando: ' + stInst.ator + ' (' + itens.length + ')' : '') +
       (foraDaArea ? ' | ' + foraDaArea + ' em outras \u00e1reas' : '') +
-      (foraDoTime ? ' | ' + foraDoTime + ' de outros times' : '') + ' | Kanban ' + VERSAO +
+      (foraDoTime ? ' | ' + foraDoTime + ' de outros times' : '') +
+      (buscando ? ' | busca: ' + achados + ' encontrado(s)' + (LB.carregando ? ', procurando no Zeev\u2026' : '') : '') +
+      (stInst.comigo ? ' | s\u00f3 comigo' + (MEU.erro ? ' (n\u00e3o foi poss\u00edvel ler suas tarefas)' : '') : '') + ' | Kanban ' + VERSAO +
       (ocultos ? ' | ' + ocultos + ' oculto(s) pela busca' : '');
     document.documentElement.classList.toggle('lcbk-on', stInst.view === 'kanban');
     $$('.lcbk-seg', uiI.bar).forEach(function (b) {
@@ -2565,6 +2640,15 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     });
     uiI.tools.appendChild(uiI.fTime);
     uiI.tools.appendChild(uiI.fAtor);
+    uiI.btnComigo = el('button', 'lcbk-btn lcbk-comigo', 'Comigo');
+    uiI.btnComigo.type = 'button';
+    uiI.btnComigo.title = 'S\u00f3 as solicita\u00e7\u00f5es em que voc\u00ea tem tarefa aberta agora';
+    uiI.btnComigo.addEventListener('click', function () {
+      stInst.comigo = !stInst.comigo;
+      if (stInst.comigo && (!MEU.nums || Date.now() - MEU.em.getTime() > 120000)) carregarMinhas();
+      renderInst();
+    });
+    uiI.tools.appendChild(uiI.btnComigo);
     var lbl = el('label', 'lcbk-check');
     uiI.outras = el('input');
     uiI.outras.type = 'checkbox';
@@ -2583,7 +2667,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var tb;
     busca.addEventListener('input', function () {
       clearTimeout(tb);
-      tb = setTimeout(function () { stInst.busca = clean(busca.value); renderInst(); }, 150);
+      tb = setTimeout(function () { stInst.busca = clean(busca.value); buscarNoZeev(stInst.busca); renderInst(); }, 150);
     });
     uiI.tools.appendChild(busca);
     uiI.btnTudo = el('button', 'lcbk-btn');
