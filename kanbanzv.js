@@ -351,9 +351,9 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-10-26';
+  var VERSAO = '2026-10-26b';
   if (ls('lcbKanbanVersao') !== VERSAO) {
-    if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
+    if (['2026-10-21', '2026-10-26'].indexOf(ls('lcbKanbanVersao')) === -1) { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
   }
 
@@ -368,6 +368,39 @@
 function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function clean(s) { return (s == null ? '' : String(s)).replace(/\s+/g, ' ').trim(); }
   function lower(s) { return clean(s).toLowerCase(); }
+  // \u2500\u2500 Busca: sem acento, sem mai\u00fascula, palavra por palavra, n\u00fameros em qualquer formato.
+  //    S\u00f3 em mem\u00f3ria (nada vai para o navegador) e s\u00f3 sobre o que o Zeev j\u00e1 deixou a pessoa ver.
+  function fold(s) {
+    var t = clean(s).toLowerCase();
+    return t.normalize ? t.normalize('NFD').replace(/[\u0300-\u036f]/g, '') : t;
+  }
+  function prepBusca(q) {
+    var f = fold(q);
+    if (!f) return null;
+    var dig = f.replace(/\D/g, '');
+    return {
+      q: q,
+      dig: dig.length >= 3 && !/[a-z]/.test(f) ? dig : '',    // s\u00f3 n\u00fameros: n\u00ba, CPF ou processo, com ou sem pontua\u00e7\u00e3o
+      tokens: f.replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean)
+    };
+  }
+  function indiceBusca(it) {
+    if (it._ix) return it._ix;
+    var inf = it.info || {};
+    var txt = [it.numero, it.titulo, inf.nome, it.processo, it.atividade, it.quem, it.donoNome, inf.procNum, inf.cpf, it.status].join(' ');
+    var dig = [it.num || digits(it.numero), inf.cpf, inf.procNum].map(function (v) { return String(v || '').replace(/\D/g, ''); })
+      .filter(Boolean).join(' ');
+    return (it._ix = { txt: ' ' + fold(txt).replace(/[^a-z0-9]+/g, ' ') + ' ', dig: ' ' + dig + ' ' });
+  }
+  // Cada palavra digitada tem de ser o COME\u00c7O de alguma palavra do card (ordem livre):
+  // "rosimere", "rosi silva", "silva rosimere" e "ros" acham "Rosim\u00e9re Zanetti da Silva".
+  function bateBusca(it, P) {
+    if (!P) return true;
+    var ix = indiceBusca(it);
+    if (P.dig) return ix.dig.indexOf(P.dig) !== -1;
+    for (var i = 0; i < P.tokens.length; i++) if (ix.txt.indexOf(' ' + P.tokens[i]) === -1) return false;
+    return P.tokens.length > 0;
+  }
   function txt(el) { return el ? clean(el.textContent) : ''; }
   function digits(s) { var m = clean(s).match(/\d+/); return m ? m[0] : ''; }
   function $$(q, ctx) { return Array.prototype.slice.call((ctx || document).querySelectorAll(q)); }
@@ -934,12 +967,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   };
   var ui = {};
 
-  function combina(it, q) {
-    if (!q) return true;
-    var inf = it.info || {};
-    var cpf = inf.cpf ? inf.cpf + ' ' + inf.cpf.replace(/\D/g, '') : '';
-    return [it.numero, it.titulo, it.processo, it.atividade, it.quem, it.donoNome, inf.nome, inf.procNum, cpf].join(' ').toLowerCase().indexOf(q) !== -1;
-  }
+  function combina(it, P) { return !P || bateBusca(it, P); }
 
   function resumoEquipe(itens) {
     var por = {};
@@ -1020,12 +1048,12 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var cols = L.cols();
     var buckets = {};
     cols.forEach(function (c) { buckets[c.id] = []; });
-    var q = state.busca.toLowerCase();
+    var q = state.busca.toLowerCase(), PB = prepBusca(state.busca);
     var ocultos = 0;
     porFase.forEach(function (it) {
       var col = L.place(it);
       if (!col || !buckets[col]) return;
-      if (!combina(it, q) || (equipe && state.dono && it.dono !== state.dono)) { ocultos++; return; }
+      if (!combina(it, PB) || (equipe && state.dono && it.dono !== state.dono)) { ocultos++; return; }
       buckets[col].push(it);
     });
 
@@ -1316,6 +1344,29 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-gaveta-frame{flex:1;width:100%;border:0;background:#fff;border-radius:0 0 12px 12px}',
       '.lcbk-busca-vazia{grid-column:1 / -1;font-size:13px;color:#404857;background:#fff;border:1px dashed #c9cfda;border-radius:10px;padding:18px;margin:0}',
       '.lcbk-comigo.is-on{background:#1b2f5c;color:#fff;border-color:#1b2f5c}',
+      '.lcbk-busca{grid-column:1 / -1;display:flex;flex-direction:column;gap:10px;min-width:0}',
+      '.lcbk-busca-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;font-size:13px;color:#172b4d}',
+      '.lcbk-busca-head small{flex-basis:100%;color:#5e6c84}',
+      '.lcbk-pes{background:#fff;border:1px solid #e1e4ea;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}',
+      '.lcbk-pes.is-rep{border-left:4px solid #d97706}',
+      '.lcbk-pes-top{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px}',
+      '.lcbk-pes-top .lcbk-proc{margin:0}',
+      '.lcbk-pes-nome{font-size:14px;color:#172b4d;text-transform:uppercase}',
+      '.lcbk-pes-obs{font-size:12px;color:#8993a4}',
+      '.lcbk-pes-rows{display:flex;flex-direction:column;gap:4px}',
+      '.lcbk-bsol{display:flex;align-items:center;gap:10px;width:100%;text-align:left;font:inherit;font-size:12px;color:#404857;background:#f7f8fa;border:1px solid transparent;border-radius:8px;padding:7px 10px;cursor:pointer}',
+      '.lcbk-bsol:hover{border-color:#c9cfda;background:#fff}',
+      '.lcbk-bsol:focus-visible{outline:2px solid #3b6fd8;outline-offset:2px}',
+      '.lcbk-bsol.is-done{opacity:.75}',
+      '.lcbk-bsol-txt{flex:1;min-width:0;display:flex;flex-direction:column}',
+      '.lcbk-bsol-txt strong{color:#172b4d;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.lcbk-bsol-txt span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.lcbk-bst{font-size:11px;font-weight:600;border-radius:999px;padding:2px 8px;background:#f1f2f5;color:#404857;white-space:nowrap}',
+      '.lcbk-bst.is-on{background:#e8f0fe;color:#1b4fb3}',
+      '.lcbk-bst.is-late{background:#fdecea;color:#b42318}',
+      '.lcbk-bst.is-warn{background:#fff4e5;color:#9a4b00}',
+      '.lcbk-bst.is-done{background:#eef0f3;color:#5e6c84}',
+      '@media (max-width:768px){.lcbk-bsol{flex-wrap:wrap}.lcbk-bsol-txt strong,.lcbk-bsol-txt span{white-space:normal}}',
       '.lcbk-mais{width:100%;margin-top:4px;background:#fff}',
       '.lcbk-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#404857;cursor:pointer}',
       '.lcbk-chip.is-area{background:#f1f2f5;color:#404857}',
@@ -1927,7 +1978,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     painel: ls('lcbKanbanPainel') !== '0',
     time: ['triagem', 'comercial', 'juridico'].indexOf(ls('lcbKanbanTime')) !== -1 ? ls('lcbKanbanTime') : '',
     totalConfirmado: '',
-    busca: ''
+    busca: '',
+    soRepetidos: false,
+    limBusca: 60
   };
   var uiI = {};
 
@@ -2367,6 +2420,108 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     p.replaceChildren(frag);
   }
 
+  // \u2550\u2550\u2550 BUSCA POR PESSOA \u2550\u2550\u2550
+  // Agrupa as solicita\u00e7\u00f5es encontradas por PESSOA: pelo CPF do cliente quando o resumo tem;
+  // sen\u00e3o, pelo nome (sem acento). Mostra repetidos e hom\u00f4nimos.
+  function nomePessoa(it) { var inf = it.info || {}; return inf.nome || (it.processo ? it.titulo : ''); }
+  function agruparPessoas(lista) {
+    var grupos = {}, porNome = {};
+    lista.forEach(function (it) {
+      var inf = it.info || {}, cpf = String(inf.cpf || '').replace(/\D/g, ''), nome = nomePessoa(it), fn = fold(nome);
+      var k = cpf.length === 11 ? 'c:' + cpf : fn ? 'n:' + fn : 'x:' + it.num;
+      var g = grupos[k] || (grupos[k] = { k: k, nome: nome, cpf: cpf.length === 11 ? inf.cpf : '', fn: fn, itens: [], ativos: 0 });
+      if (!g.nome && nome) { g.nome = nome; g.fn = fn; }
+      g.itens.push(it);
+      if (it.ativo) g.ativos++;
+    });
+    var arr = Object.keys(grupos).map(function (k) { return grupos[k]; });
+    arr.forEach(function (g) { if (g.fn) (porNome[g.fn] = porNome[g.fn] || []).push(g); });
+    arr.forEach(function (g) {
+      var mesmos = g.fn ? porNome[g.fn] : [];
+      g.repetido = g.itens.length > 1;
+      g.homonimo = mesmos.filter(function (o) { return o !== g && o.cpf && g.cpf; }).length;         // mesmo nome, outro CPF
+      g.semCpfIgual = mesmos.filter(function (o) { return o !== g && (!o.cpf || !g.cpf); }).length;   // talvez a mesma pessoa
+      g.itens.sort(function (a, b) { return (b.ativo - a.ativo) || ((+b.num || 0) - (+a.num || 0)); });
+    });
+    arr.sort(function (a, b) {
+      return ((b.repetido || b.semCpfIgual ? 1 : 0) - (a.repetido || a.semCpfIgual ? 1 : 0)) ||
+             (a.fn || '~').localeCompare(b.fn || '~') || b.itens.length - a.itens.length;
+    });
+    return arr;
+  }
+  function linhaSolicitacao(it) {
+    var b = el('button', 'lcbk-bsol' + (it.ativo ? (it.late ? ' is-late' : '') : ' is-done'));
+    b.type = 'button';
+    b.setAttribute('aria-label', 'Abrir ' + it.numero + ' ' + (it.processo || it.titulo));
+    b.addEventListener('click', function (e) {
+      abrirComTecla(e, it.href, it.numero + ' \u00b7 ' + it.titulo, function () { abrirInstancia(it); });
+    });
+    b.appendChild(el('span', 'lcbk-num', it.numero));
+    var meio = el('span', 'lcbk-bsol-txt');
+    meio.appendChild(el('strong', null, it.processo || it.titulo));
+    var det = it.ativo
+      ? [it.atividade, it.fila ? 'na fila, ningu\u00e9m assumiu' : (it.quem ? 'com ' + it.quem : ''), it.prazoTxt ? 'prazo ' + it.prazoTxt : '']
+      : [(it.status || 'Encerrada') + (it.fimEm ? ' em ' + fmtData(it.fimEm) : '')];
+    if ((it.info || {}).procNum) det.push('processo ' + it.info.procNum);
+    meio.appendChild(el('span', null, det.filter(Boolean).join(' \u00b7 ')));
+    b.appendChild(meio);
+    var st = !it.ativo ? [/rejeit|cancel|reprov|perd/i.test(it.status) ? 'Rejeitada/encerrada' : 'Encerrada', 'is-done']
+      : it.late ? ['Atrasada', 'is-late'] : ['Em andamento', 'is-on'];
+    b.appendChild(el('span', 'lcbk-bst ' + st[1], st[0]));
+    return b;
+  }
+  function viewBusca(achados, base, completo) {
+    var wrap = el('section', 'lcbk-busca');
+    wrap.setAttribute('aria-label', 'Resultado da busca');
+    var grupos = agruparPessoas(achados);
+    var nRep = grupos.filter(function (g) { return g.repetido || g.semCpfIgual; }).length;
+    var head = el('div', 'lcbk-busca-head');
+    head.appendChild(el('strong', null, fmtN(grupos.length) + (grupos.length === 1 ? ' pessoa' : ' pessoas') + ' \u00b7 ' +
+      fmtN(achados.length) + (achados.length === 1 ? ' solicita\u00e7\u00e3o' : ' solicita\u00e7\u00f5es')));
+    if (nRep) head.appendChild(el('span', 'lcbk-bst is-late', fmtN(nRep) + ' com mais de uma solicita\u00e7\u00e3o ou poss\u00edvel duplicidade'));
+    var lbl = el('label', 'lcbk-check');
+    var ck = el('input'); ck.type = 'checkbox'; ck.checked = stInst.soRepetidos;
+    ck.addEventListener('change', function () { stInst.soRepetidos = ck.checked; renderInst(); });
+    lbl.appendChild(ck); lbl.appendChild(document.createTextNode(' S\u00f3 repetidos'));
+    head.appendChild(lbl);
+    var cobertura = completo ? 'Busca em todas as ' + fmtN(base) + ' solicita\u00e7\u00f5es desta lista (todos os status e etapas).'
+      : 'Busca nas ' + fmtN(base) + ' solicita\u00e7\u00f5es j\u00e1 carregadas' + (LC.carregando ? ' \u2014 a carga continua e o resultado se atualiza sozinho.' : '. Use "Carregar todas" para buscar na lista inteira.');
+    if (LB.carregando && LB.q === stInst.busca) cobertura += ' Procurando tamb\u00e9m pela Palavra-chave do Zeev\u2026';
+    head.appendChild(el('small', null, cobertura));
+    wrap.appendChild(head);
+    var lista = stInst.soRepetidos ? grupos.filter(function (g) { return g.repetido || g.semCpfIgual; }) : grupos;
+    if (!lista.length) {
+      wrap.appendChild(el('p', 'lcbk-busca-vazia', LB.carregando && LB.q === stInst.busca
+        ? 'Procurando "' + stInst.busca + '"\u2026'
+        : stInst.soRepetidos && grupos.length ? 'Nenhuma pessoa repetida neste resultado.'
+        : 'Nada encontrado para "' + stInst.busca + '". Tente s\u00f3 o primeiro nome, s\u00f3 os n\u00fameros do CPF ou o n\u00ba da solicita\u00e7\u00e3o.'));
+      return wrap;
+    }
+    lista.slice(0, stInst.limBusca).forEach(function (g) {
+      var c = el('article', 'lcbk-pes' + (g.repetido || g.semCpfIgual ? ' is-rep' : ''));
+      var top = el('div', 'lcbk-pes-top');
+      top.appendChild(el('strong', 'lcbk-pes-nome', g.nome || 'Sem nome no resumo'));
+      if (g.cpf) blocoInfo(top, { cpf: g.cpf }, false);
+      else top.appendChild(el('span', 'lcbk-pes-obs', 'CPF n\u00e3o informado no resumo'));
+      var tags = el('div', 'lcbk-tags');
+      tags.appendChild(el('span', 'lcbk-chip', g.itens.length + (g.itens.length === 1 ? ' solicita\u00e7\u00e3o' : ' solicita\u00e7\u00f5es') +
+        (g.ativos ? ' (' + g.ativos + ' em andamento)' : '')));
+      if (g.repetido) tags.appendChild(el('span', 'lcbk-bst is-late', g.cpf ? 'Repetido: mesmo CPF' : 'Repetido: mesmo nome'));
+      if (g.semCpfIgual) tags.appendChild(el('span', 'lcbk-bst is-warn', 'Mesmo nome em outro registro sem CPF: confira'));
+      if (g.homonimo) tags.appendChild(el('span', 'lcbk-bst', 'Hom\u00f4nimo: mesmo nome com outro CPF'));
+      top.appendChild(tags);
+      c.appendChild(top);
+      var rows = el('div', 'lcbk-pes-rows');
+      g.itens.forEach(function (it) { rows.appendChild(linhaSolicitacao(it)); });
+      c.appendChild(rows);
+      wrap.appendChild(c);
+    });
+    if (lista.length > stInst.limBusca) wrap.appendChild(botaoMais(lista.length - stInst.limBusca, function () {
+      stInst.limBusca += 60; renderInst();
+    }));
+    return wrap;
+  }
+
   function renderInst() {
     if (!uiI.board) return;
     var lidos = itensDaLista();
@@ -2409,19 +2564,17 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var itens = stInst.ator && !semRecorte ? todos.filter(function (it) { return chaveAtor(it) === stInst.ator; }) : todos;
     var cols = L.cols(), buckets = {}, q = stInst.busca.toLowerCase(), ocultos = 0, achados = 0;
     cols.forEach(function (c) { buckets[c.id] = []; });
+    var PB = prepBusca(stInst.busca), achadosL = [];
     itens.forEach(function (it) {
-      var col = L.place(it);
-      if (!buckets[col]) return;
-      var cpfI = (it.info || {}).cpf ? it.info.cpf + ' ' + it.info.cpf.replace(/\D/g, '') : '';
-      var texto = [it.numero, it.titulo, it.processo, it.atividade, it.quem, (it.info || {}).procNum, cpfI].join(' ').toLowerCase();
-      var qd = q.replace(/\D/g, '');
-      if (q && !it._busca && texto.indexOf(q) === -1 && !(qd.length >= 4 && texto.replace(/\D/g, ' ').indexOf(qd) !== -1)) {
-        ocultos++;
+      if (buscando) {                       // busca: TODAS as etapas e status, inclusive fora da esteira
+        if (it._busca || bateBusca(it, PB)) achadosL.push(it); else ocultos++;
         return;
       }
-      if (q) achados++;
+      var col = L.place(it);
+      if (!buckets[col]) return;
       buckets[col].push(it);
     });
+    achados = achadosL.length;
     // Se TODOS os carregados ca\u00edram numa \u00fanica coluna, o total do Zeev PODE ser o total dela,
     // mas s\u00f3 se a lista estiver filtrada por essa etapa. O script n\u00e3o tem como saber isso:
     // a pessoa confirma com um clique, e a confirma\u00e7\u00e3o vale s\u00f3 para esse total e essa coluna.
@@ -2480,17 +2633,15 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       frag.appendChild(sec);
     });
     uiI.board.replaceChildren(frag);
-    if (buscando && !achados) {
-      uiI.board.appendChild(el('p', 'lcbk-busca-vazia', LB.carregando && LB.q === stInst.busca
-        ? 'Procurando "' + stInst.busca + '" em todas as solicita\u00e7\u00f5es que voc\u00ea pode ver no Zeev\u2026'
-        : 'Nada encontrado para "' + stInst.busca + '". Confira a grafia, ou procure pelo n\u00famero da solicita\u00e7\u00e3o, CPF ou n\u00famero do processo.'));
+    if (buscando) {
+      uiI.board.replaceChildren(viewBusca(achadosL, lidos.length, completo));
     } else if (stInst.comigo && MEU.carregando && !MEU.nums) {
       uiI.board.appendChild(el('p', 'lcbk-busca-vazia', 'Buscando as suas tarefas abertas\u2026'));
     } else if (stInst.comigo && !uiI.board.children.length) {
       uiI.board.appendChild(el('p', 'lcbk-busca-vazia', MEU.erro ? 'N\u00e3o foi poss\u00edvel ler as suas tarefas abertas.'
         : 'Nenhuma solicita\u00e7\u00e3o desta lista est\u00e1 com voc\u00ea agora.'));
     }
-    uiI.board.style.setProperty('--lcbk-cols', String(uiI.board.children.length || 1));
+    uiI.board.style.setProperty('--lcbk-cols', String(buscando ? 1 : (uiI.board.children.length || 1)));
     uiI.btnComigo.classList.toggle('is-on', stInst.comigo);
     uiI.btnComigo.setAttribute('aria-pressed', stInst.comigo ? 'true' : 'false');
     uiI.btnComigo.textContent = stInst.comigo && !MEU.nums ? 'Comigo\u2026' : 'Comigo';
@@ -2538,7 +2689,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       box.appendChild(b);
     });
     uiI.resumo.replaceChildren(box);
-    uiI.resumo.style.display = stInst.view === 'kanban' && lista.length && !(EH_GESTOR && stInst.painel) ? '' : 'none';
+    uiI.resumo.style.display = stInst.view === 'kanban' && lista.length && !buscando && !(EH_GESTOR && stInst.painel) ? '' : 'none';
     renderPainel(lidos, completo, totalZeev());
     if (uiI.btnPainel) {
       uiI.btnPainel.style.display = EH_GESTOR && stInst.view === 'kanban' ? '' : 'none';
@@ -2578,7 +2729,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       (foraDoTime ? ' | ' + foraDoTime + ' de outros times' : '') +
       (buscando ? ' | busca: ' + achados + ' encontrado(s)' + (LB.carregando ? ', procurando no Zeev\u2026' : '') : '') +
       (stInst.comigo ? ' | s\u00f3 comigo' + (MEU.erro ? ' (n\u00e3o foi poss\u00edvel ler suas tarefas)' : '') : '') + ' | Kanban ' + VERSAO +
-      (ocultos ? ' | ' + ocultos + ' oculto(s) pela busca' : '');
+      (ocultos && !buscando ? ' | ' + ocultos + ' oculto(s) pela busca' : '');
     document.documentElement.classList.toggle('lcbk-on', stInst.view === 'kanban');
     $$('.lcbk-seg', uiI.bar).forEach(function (b) {
       var on = stInst.view === b.dataset.value;
@@ -2662,13 +2813,30 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     uiI.tools.appendChild(lbl);
     var busca = el('input', 'lcbk-search');
     busca.type = 'search';
-    busca.placeholder = 'Buscar n\u00ba, nome, CPF, processo ou atividade';
-    busca.setAttribute('aria-label', 'Buscar no Kanban');
+    busca.placeholder = 'Buscar nome, 1\u00ba nome, CPF, n\u00ba ou processo  ( / )';
+    busca.setAttribute('aria-label', 'Buscar pessoas e solicita\u00e7\u00f5es');
+    busca.title = 'Sem acento e em qualquer ordem: "rosimere", "rosi silva", "514.8", "#12132". Atalho: tecla /';
+    uiI.busca = busca;
     var tb;
     busca.addEventListener('input', function () {
       clearTimeout(tb);
-      tb = setTimeout(function () { stInst.busca = clean(busca.value); buscarNoZeev(stInst.busca); renderInst(); }, 150);
+      tb = setTimeout(function () {
+        stInst.busca = clean(busca.value); stInst.limBusca = 60;
+        buscarNoZeev(stInst.busca); renderInst();
+      }, 200);
     });
+    busca.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && busca.value) { e.preventDefault(); busca.value = ''; stInst.busca = ''; buscarNoZeev(''); renderInst(); }
+    });
+    if (!uiI.atalho) {                     // "/" em qualquer lugar da tela (fora de campos) vai para a busca
+      uiI.atalho = true;
+      document.addEventListener('keydown', function (e) {
+        var a = document.activeElement, tag = a && a.tagName;
+        if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || !uiI.busca || !document.contains(uiI.busca)) return;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (a && a.isContentEditable)) return;
+        e.preventDefault(); uiI.busca.focus(); uiI.busca.select();
+      });
+    }
     uiI.tools.appendChild(busca);
     uiI.btnTudo = el('button', 'lcbk-btn');
     uiI.btnTudo.type = 'button';
