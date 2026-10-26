@@ -20,6 +20,24 @@
     // Acompanhar solicita\u00e7\u00f5es / Monitorar: qualquer p\u00e1gina /my/... ou /report/... que tenha a
     // tabela de inst\u00e2ncias. A detec\u00e7\u00e3o final \u00e9 pelo HTML (td.instance-cell).
     pathInstancias: /^\/(my|report)\//,
+    // Informa\u00e7\u00f5es do card, lidas do RESUMO da solicita\u00e7\u00e3o/tarefa (o que o Zeev mostra na lista).
+    // Lista branca: s\u00f3 estes r\u00f3tulos s\u00e3o lidos. CPF, telefone, e-mail etc. s\u00e3o ignorados.
+    // Propostas: da mais recente para a mais antiga; o card mostra a primeira que tiver valor.
+    resumo: {
+      // CPF do cliente no card: 'mascarado' (***.456.789-**, clique mostra completo), 'completo' ou 'oculto'
+      cpf: 'mascarado',
+      processo: /^(n[u\u00fa]mero (do|de) )?processo( de origem| judicial| principal)?$|^n[u\u00fa]mero do (precat[o\u00f3]rio|rpv)/i,
+      face: /valor de face|\bvta\b|\bvthc\b|valor total do ativo|valor total dos honor/i,
+      tipo: /^tipo (de|do) (cr[e\u00e9]dito|ativo)$|^ativo$/i,
+      propostas: [
+        [/corrigid/i, 'corrigida'],
+        [/diretor financeiro|\bdf\b|para hoje/i, 'diretor financeiro'],
+        [/segunda proposta|2[\u00aaa\u00b0o]? ?proposta|\bvsp/i, '2\u00aa proposta'],
+        [/primeira proposta|1[\u00aaa\u00b0o]? ?proposta|\bvpp/i, '1\u00aa proposta'],
+        [/^valor d[ao] proposta|^proposta( vigente)?$/i, 'proposta']
+      ]
+    },
+
     // Produ\u00e7\u00e3o e fechamentos (Vis\u00e3o do gestor): lidos do LOG DE TAREFAS do pr\u00f3prio Zeev
     // (export "tarefas"), com as mesmas regras da Torre de Controle.
     producao: {
@@ -327,7 +345,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-10-21';
+  var VERSAO = '2026-10-26';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -497,6 +515,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       return {
         kind: 'tarefa', tr: tr, taskCell: taskCell,
         link: q('a.task-open-link[href]') || q('a.task-open-button[href]') || (taskCell && taskCell.querySelector('a[href]')),
+        info: infoResumo(q('.task-cell--summary') || q('.task-summary')),
         num: digits(numero), numero: numero, titulo: semDoc(titulo), processo: semDoc(processo),
         atividade: semDoc(titulo), quem: firstLine(q(s.requester)),
         due: due, late: late,
@@ -704,6 +723,54 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     }
   }
 
+  function mascararCpf(cpf) { return '***.' + cpf.slice(4, 11) + '-**'; }
+  function blocoInfo(c, info, comNome) {
+    if (!info) return;
+    if (comNome && info.nome) c.appendChild(el('div', 'lcbk-cli', info.nome));
+    if (info.cpf) {
+      var completo = CFG.resumo.cpf === 'completo';
+      var lin = el('div', 'lcbk-proc');
+      lin.appendChild(el('span', null, 'CPF '));
+      var v = el(completo ? 'strong' : 'button', completo ? null : 'lcbk-cpf', completo ? info.cpf : mascararCpf(info.cpf));
+      if (!completo) {
+        v.type = 'button';
+        v.title = 'Mostrar o CPF completo';
+        v.setAttribute('aria-label', 'Mostrar o CPF completo');
+        v.addEventListener('click', function (e) {
+          e.stopPropagation();                               // n\u00e3o abre a tarefa
+          var aberto = v.textContent === info.cpf;
+          v.textContent = aberto ? mascararCpf(info.cpf) : info.cpf;
+          v.title = aberto ? 'Mostrar o CPF completo' : 'Ocultar o CPF';
+        });
+        v.addEventListener('keydown', function (e) { e.stopPropagation(); });
+      }
+      lin.appendChild(v);
+      c.appendChild(lin);
+    }
+    var linhas = [];
+    if (info.procNum) {
+      var pr = el('div', 'lcbk-proc');
+      pr.appendChild(el('span', null, 'Processo '));
+      pr.appendChild(el('strong', null, info.procNum));
+      pr.title = 'Processo ' + info.procNum;
+      c.appendChild(pr);
+    }
+    if (info.proposta) linhas.push(['Proposta', info.proposta, info.propostaRot, 'is-valor']);
+    if (info.face) linhas.push(['Valor de face', info.face, '', 'is-valor']);
+    if (!linhas.length) return;
+    var g = el('dl', 'lcbk-info');
+    linhas.forEach(function (l) {
+      g.appendChild(el('dt', null, l[0]));
+      var dd = el('dd', l[3], l[1]);
+      if (l[2]) dd.appendChild(el('small', null, l[2]));
+      g.appendChild(dd);
+    });
+    c.appendChild(g);
+  }
+  function chipTipo(tags, info) {
+    if (info && info.tipo) tags.appendChild(el('span', 'lcbk-chip is-ativo', info.tipo));
+  }
+
   function botaoMais(resto, onClick) {
     var b = el('button', 'lcbk-btn lcbk-mais',
       'Mostrar mais ' + fmtN(Math.min(resto, CFG.lista.cardsPorColuna)) + ' (' + fmtN(resto) + ' restantes)');
@@ -747,10 +814,12 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
 
     c.appendChild(el('div', 'lcbk-title', it.titulo));
     if (lead && it.atividade && it.atividade !== it.titulo) c.appendChild(el('div', 'lcbk-app', it.atividade));
+    blocoInfo(c, it.info, it.kind === 'tarefa');
     if (it.processo) c.appendChild(el('div', 'lcbk-app', it.processo));
 
     var tags = el('div', 'lcbk-tags');
     tags.appendChild(el('span', 'lcbk-tipo is-' + it.tipo, NOME_TIPO[it.tipo] || NOME_TIPO.pai));
+    chipTipo(tags, it.info);
     var mostrarEtapa = !it.finalizado && it.stage && it.stage !== 'outros' && !(it._col && it._col.unica) &&
       !(it.tipo !== 'filho' && it.stage === 'triagem');
     if (mostrarEtapa) tags.appendChild(el('span', 'lcbk-chip', NOME_ETAPA[it.stage] || it.stage));
@@ -796,7 +865,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
 
   function combina(it, q) {
     if (!q) return true;
-    return [it.numero, it.titulo, it.processo, it.atividade, it.quem, it.donoNome].join(' ').toLowerCase().indexOf(q) !== -1;
+    var inf = it.info || {};
+    var cpf = inf.cpf ? inf.cpf + ' ' + inf.cpf.replace(/\D/g, '') : '';
+    return [it.numero, it.titulo, it.processo, it.atividade, it.quem, it.donoNome, inf.nome, inf.procNum, cpf].join(' ').toLowerCase().indexOf(q) !== -1;
   }
 
   function resumoEquipe(itens) {
@@ -1152,6 +1223,17 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-painel-head .lcbk-btn{margin-left:auto;padding:6px 10px}',
       '.lcbk-painel-head span.is-err{color:#a1281f}',
       '.lcbk-nota{font-size:11.5px;color:#6b778c;margin:8px 2px 0}',
+      '.lcbk-cli{font-size:12.5px;font-weight:600;color:#1b2f5c;margin-top:3px}',
+      '.lcbk-info{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;margin:7px 0 2px;padding:7px 9px;background:#f6f8fb;border-radius:6px;font-size:12px}',
+      '.lcbk-info dt{color:#6b778c;margin:0}',
+      '.lcbk-info dd{margin:0;color:#172b4d;text-align:right;word-break:break-word}',
+      '.lcbk-info dd.is-valor{font-weight:700;font-variant-numeric:tabular-nums}',
+      '.lcbk-proc{font-size:11.5px;color:#6b778c;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '.lcbk-cpf{border:0;background:none;padding:0;font:inherit;font-weight:600;color:#172b4d;font-variant-numeric:tabular-nums;cursor:pointer;border-bottom:1px dashed #8993a4}',
+      '.lcbk-cpf:focus-visible{outline:2px solid #3b6fd8;outline-offset:2px}',
+      '.lcbk-proc strong{color:#172b4d;font-weight:600;font-variant-numeric:tabular-nums}',
+      '.lcbk-info dd small{display:block;font-weight:400;font-size:10.5px;color:#6b778c}',
+      '.lcbk-chip.is-ativo{background:#fff4e0;color:#8a5300}',
       '.lcbk-mais{width:100%;margin-top:4px;background:#fff}',
       '.lcbk-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#404857;cursor:pointer}',
       '.lcbk-chip.is-area{background:#f1f2f5;color:#404857}',
@@ -1196,7 +1278,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
 
     ui.search = el('input', 'lcbk-search');
     ui.search.type = 'search';
-    ui.search.placeholder = 'Buscar n\u00ba, nome ou atividade';
+    ui.search.placeholder = 'Buscar n\u00ba, nome, CPF, processo ou atividade';
     ui.search.setAttribute('aria-label', 'Buscar no Kanban');
     var tb;
     ui.search.addEventListener('input', function () {
@@ -1313,6 +1395,59 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     return melhor;
   }
 
+  // L\u00ea pares "R\u00f3tulo: valor" do resumo, pela ordem do texto (funciona com r\u00f3tulo em elemento
+  // pr\u00f3prio, em negrito ou tudo num texto s\u00f3).
+  function lerResumo(root) {
+    if (!root) return [];
+    var pares = [], atual = null, w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), n;
+    while ((n = w.nextNode())) {
+      var t = clean(n.nodeValue);
+      if (!t) continue;
+      var m = t.match(/^([^:]{2,60}?):\s*(.*)$/);
+      if (m && /[A-Za-z\u00c0-\u00ff]/.test(m[1]) && !/^\d/.test(m[1]) && m[1].split(' ').length <= 8) {
+        atual = { rotulo: clean(m[1]), valor: m[2] || '' };
+        pares.push(atual);
+      } else if (atual) {
+        atual.valor = clean(atual.valor + ' ' + t);
+      }
+    }
+    return pares;
+  }
+  function moeda(v) {
+    v = clean(v);
+    return /\d/.test(v) && !/^R\$/.test(v) ? 'R$ ' + v : v;
+  }
+  function infoResumo(root) {
+    var R = CFG.resumo, info = {}, props = [];
+    lerResumo(root).forEach(function (p) {
+      var r = lower(p.rotulo);
+      // CPF do CLIENTE (s\u00f3 ele): guardado formatado, para exibir mascarado ou completo
+      if (/^cpf( do cliente| do autor)?$/.test(r)) {
+        var mc = String(p.valor).match(/(\d{3})\.?(\d{3})\.?(\d{3})-?(\d{2})/);
+        if (mc && !info.cpf && R.cpf !== 'oculto') info.cpf = mc[1] + '.' + mc[2] + '.' + mc[3] + '-' + mc[4];
+        return;
+      }
+      if (/cpf|cnpj|telefone|celular|whats|e-?mail|nascimento|endere|cep|\brg\b/.test(r)) return;   // nunca
+      var v = semDoc(cortarRotulos(p.valor));
+      if (!v) return;
+      if (!info.nome && /^nome( do cliente| do autor| completo do cliente)?$/.test(r)) { info.nome = v; return; }
+      if (!info.procNum && R.processo.test(r)) { info.procNum = v; return; }
+      if (!info.face && R.face.test(r)) { info.face = moeda(v); return; }
+      if (!info.tipo && R.tipo.test(r)) { info.tipo = v; return; }
+      if (/n[u\u00fa]mero/.test(r)) return;                       // "n\u00famero da proposta" n\u00e3o \u00e9 valor
+      for (var i = 0; i < R.propostas.length; i++) {
+        if (R.propostas[i][0].test(r) && /\d/.test(v)) { props.push({ ordem: i, valor: moeda(v), rotulo: R.propostas[i][1] }); break; }
+      }
+    });
+    if (props.length) {
+      props.sort(function (a, b) { return a.ordem - b.ordem; });
+      info.proposta = props[0].valor;
+      info.propostaRot = props[0].rotulo;
+    }
+    return info;
+  }
+  function htmlParaRaiz(h) { return h ? new DOMParser().parseFromString(String(h), 'text/html').body : null; }
+
   function nomeDaCelula(cel) {
     if (!cel) return '';
     var labels = cel.querySelectorAll('[class*="label"], b, strong, dt');
@@ -1360,6 +1495,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var cSt = tr.querySelector(S.status);
       var linhas = linhasDe(cSol);
       var nome = nomeDaCelula(cSol);
+      var infoSol = infoResumo(cSol);
       var processo = semDoc(cortarRotulos(String(linhas[0] || '').replace(/nome( do cliente)?\s*:.*$/i, '')));
       var atividade = cAtv ? (txt(cAtv.querySelector(S.atividade)) || firstLine(cAtv)) : '';
       var resp = cAtv ? txt(cAtv.querySelector(S.responsavel)) : '';
@@ -1379,6 +1515,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         processo: nome ? semDoc(processo) : '',
         atividade: ativo ? atividade : '',
         quem: ativo ? resp.replace(/,\s*\+\d+\s*$/, '') : '',
+        info: infoSol,
         fila: ativo && /,\s*\+\d+\s*$/.test(resp),
         mais: (resp.match(/,\s*\+(\d+)\s*$/) || [0, 0])[1] * 1,
         prazoTxt: prazoTxt, due: due, late: late,
@@ -1470,7 +1607,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var now = new Date();
     var processo = semDoc(textoDeHtml(x.serviceorflowname));
     var nome = '';
-    if (x.resume) nome = nomeDaCelula(new DOMParser().parseFromString(String(x.resume), 'text/html').body);
+    var raizRes = htmlParaRaiz(x.resume);
+    if (raizRes) nome = nomeDaCelula(raizRes);
+    var infoApi = infoResumo(raizRes);
     var atividade = semDoc(textoDeHtml(x.tasktitle));
     var status = textoDeHtml(x.status);
     var ativo = !status || /andamento/i.test(status);
@@ -1492,7 +1631,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       processo: nome ? processo : '',
       atividade: ativo ? atividade : '',
       quem: ativo ? semDoc(respTxt.replace(/,\s*\+\d+\s*$/, '')) : '',
-      fila: fila, mais: mais, prazoTxt: ativo ? prazoTxt : '', due: due, late: late,
+      fila: fila, mais: mais, prazoTxt: ativo ? prazoTxt : '', due: due, late: late, info: infoApi,
       today: !late && !!(due && due.date && due.date.toDateString() === now.toDateString()),
       ativo: ativo, status: status, fimEm: toDate(textoDeHtml(x.enddate)), inicioEm: toDate(textoDeHtml(x.startdate)),
       tipo: tipo, stage: cl.etapa, area: cl.area
@@ -1621,8 +1760,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     c.appendChild(el('div', 'lcbk-title', it.titulo));
     if (it.processo) c.appendChild(el('div', 'lcbk-app', it.processo));
     if (it.atividade) c.appendChild(el('div', 'lcbk-app lcbk-atv', it.atividade));
+    blocoInfo(c, it.info, false);
     var tags = el('div', 'lcbk-tags');
     tags.appendChild(el('span', 'lcbk-tipo is-' + it.tipo, NOME_TIPO[it.tipo] || NOME_TIPO.pai));
+    chipTipo(tags, it.info);
     if (it.ativo && it.stage && it.stage !== 'outros' && !(it._col && it._col.unica) &&
         !(it.tipo !== 'filho' && it.stage === 'triagem')) {
       tags.appendChild(el('span', 'lcbk-chip', NOME_ETAPA[it.stage] || it.stage));
@@ -2131,7 +2272,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     itens.forEach(function (it) {
       var col = L.place(it);
       if (!buckets[col]) return;
-      if (q && [it.numero, it.titulo, it.processo, it.atividade, it.quem].join(' ').toLowerCase().indexOf(q) === -1) {
+      var cpfI = (it.info || {}).cpf ? it.info.cpf + ' ' + it.info.cpf.replace(/\D/g, '') : '';
+      if (q && [it.numero, it.titulo, it.processo, it.atividade, it.quem, (it.info || {}).procNum, cpfI].join(' ').toLowerCase().indexOf(q) === -1) {
         ocultos++;
         return;
       }
@@ -2352,7 +2494,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     uiI.tools.appendChild(lbl);
     var busca = el('input', 'lcbk-search');
     busca.type = 'search';
-    busca.placeholder = 'Buscar n\u00ba, nome ou atividade';
+    busca.placeholder = 'Buscar n\u00ba, nome, CPF, processo ou atividade';
     busca.setAttribute('aria-label', 'Buscar no Kanban');
     var tb;
     busca.addEventListener('input', function () {
@@ -2486,7 +2628,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     return {
       kind: 'tarefa', tr: null, taskCell: null, link: null, href: x.lk ? sameOrigin(x.lk) : null,
       num: digits(x.cfe), numero: '#' + digits(x.cfe), titulo: titulo, processo: processo, atividade: titulo,
-      quem: nomeDoUsuario(x.u), due: due, late: late,
+      quem: nomeDoUsuario(x.u), due: due, late: late, info: infoResumo(htmlParaRaiz(x.r)),
       today: !late && !!(due && due.date && due.date.toDateString() === now.toDateString()),
       stage: cl.etapa, area: cl.area, tipo: tipo
     };
