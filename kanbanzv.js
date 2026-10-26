@@ -13,6 +13,12 @@
   'use strict';
   if (window.__lcbKanban) return;
   window.__lcbKanban = true;
+  if (window.name === 'lcbk-painel-tarefa') {
+    if (/^\/(my\/tasks|report\/(my|main))\/?$/.test(location.pathname)) {
+      try { window.parent.postMessage({ lcbk: 'voltar' }, location.origin); } catch (e) { /* ignora */ }
+    }
+    return;
+  }
 
   // \u2550\u2550\u2550 CONFIGURA\u00c7\u00c3O \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
   var CFG = {
@@ -713,6 +719,68 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     return e;
   }
 
+  // \u2550\u2550\u2550 ABRIR A TAREFA SEM SAIR DO KANBAN \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+  // A tarefa abre num painel por cima do quadro (mesma origem), com "Voltar ao Kanban".
+  // Ao voltar, o quadro s\u00f3 rel\u00ea os dados; n\u00e3o recarrega a p\u00e1gina.
+  var gaveta = null;
+  function urlAbrivel(url) {
+    var u = url && !/^\s*(#|javascript:)/i.test(url) ? sameOrigin(url) : null;
+    if (!u) return null;
+    var x = new URL(u);
+    return x.pathname + x.search === location.pathname + location.search ? null : u;
+  }
+  function abrirNoPainel(url, titulo) {
+    var u = urlAbrivel(url);
+    if (!u) return false;
+    fecharPainel(false);
+    var ov = el('div', 'lcbk-gaveta');
+    ov.setAttribute('role', 'dialog');
+    ov.setAttribute('aria-modal', 'true');
+    ov.setAttribute('aria-label', titulo || 'Tarefa');
+    var bar = el('div', 'lcbk-gaveta-bar');
+    var voltar = el('button', 'lcbk-voltar', '\u2190 Voltar ao Kanban');
+    voltar.type = 'button';
+    voltar.addEventListener('click', function () { fecharPainel(true); });
+    bar.appendChild(voltar);
+    bar.appendChild(el('span', 'lcbk-gaveta-tit', titulo || ''));
+    var nova = el('a', 'lcbk-btn', 'Abrir em nova aba');
+    nova.href = u; nova.target = '_blank'; nova.rel = 'noopener';
+    bar.appendChild(nova);
+    ov.appendChild(bar);
+    var fr = el('iframe', 'lcbk-gaveta-frame');
+    fr.name = 'lcbk-painel-tarefa';
+    fr.title = titulo || 'Tarefa';
+    fr.addEventListener('load', function () {
+      try { if (!fr.contentDocument || !fr.contentDocument.body) throw new Error('vazio'); }
+      catch (e) { fecharPainel(false); location.assign(u); }   // Zeev n\u00e3o deixou abrir no painel: abre como antes
+    });
+    fr.src = u;
+    ov.appendChild(fr);
+    document.body.appendChild(ov);
+    document.documentElement.classList.add('lcbk-travado');
+    gaveta = { ov: ov, fr: fr };
+    voltar.focus();
+    return true;
+  }
+  function fecharPainel(atualizar) {
+    if (!gaveta) return;
+    gaveta.ov.remove();
+    gaveta = null;
+    document.documentElement.classList.remove('lcbk-travado');
+    if (!atualizar) return;
+    if (MODO === 'tarefas') { if (LT.url && !LT.carregando) { buscarContagem(); carregarTarefas(); } }
+    else if (LC.url && !LC.carregando) carregarTudo();
+  }
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && gaveta) fecharPainel(true); });
+  window.addEventListener('message', function (e) {
+    if (gaveta && e.origin === location.origin && e.source === gaveta.fr.contentWindow && e.data && e.data.lcbk === 'voltar') fecharPainel(true);
+  });
+  function abrirComTecla(e, url, titulo, padrao) {
+    var u = urlAbrivel(url);
+    if (u && e && (e.ctrlKey || e.metaKey || e.button === 1)) { window.open(u, '_blank', 'noopener'); return; }
+    if (!abrirNoPainel(url, titulo)) padrao();
+  }
+
   function abrirTarefa(t) {
     if (t.tr && document.contains(t.tr)) {
       if (t.link) t.link.click();
@@ -789,9 +857,12 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       c = el('article', cls);
       c.tabIndex = 0;
       c.setAttribute('role', 'button');
-      c.addEventListener('click', function () { abrirTarefa(it); });
+      c.addEventListener('click', function (e) {
+        var url = it.href || (it.link && it.link.getAttribute('href'));
+        abrirComTecla(e, url, it.numero + ' \u00b7 ' + it.titulo, function () { abrirTarefa(it); });
+      });
       c.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrirTarefa(it); }
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); c.click(); }
       });
     } else if (it.href) {
       c = el('a', cls);
@@ -1234,6 +1305,15 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-proc strong{color:#172b4d;font-weight:600;font-variant-numeric:tabular-nums}',
       '.lcbk-info dd small{display:block;font-weight:400;font-size:10.5px;color:#6b778c}',
       '.lcbk-chip.is-ativo{background:#fff4e0;color:#8a5300}',
+      '.lcbk-travado,.lcbk-travado body{overflow:hidden!important}',
+      '.lcbk-gaveta{position:fixed;inset:0;z-index:2147483000;background:rgba(15,23,42,.45);display:flex;flex-direction:column;padding:14px}',
+      '.lcbk-gaveta-bar{display:flex;align-items:center;gap:12px;background:#fff;border-radius:12px 12px 0 0;padding:10px 14px;border-bottom:1px solid #e3e6ec}',
+      '.lcbk-voltar{border:0;background:#1b2f5c;color:#fff;font-family:inherit;font-size:13.5px;font-weight:700;border-radius:8px;padding:9px 16px;cursor:pointer}',
+      '.lcbk-voltar:hover{background:#25407a}',
+      '.lcbk-voltar:focus-visible{outline:3px solid #8fb0f0;outline-offset:2px}',
+      '.lcbk-gaveta-tit{flex:1;font-size:13px;color:#404857;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.lcbk-gaveta .lcbk-btn{text-decoration:none}',
+      '.lcbk-gaveta-frame{flex:1;width:100%;border:0;background:#fff;border-radius:0 0 12px 12px}',
       '.lcbk-mais{width:100%;margin-top:4px;background:#fff}',
       '.lcbk-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#404857;cursor:pointer}',
       '.lcbk-chip.is-area{background:#f1f2f5;color:#404857}',
@@ -1746,9 +1826,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     c.tabIndex = 0;
     c.setAttribute('role', 'button');
     c.setAttribute('aria-label', 'Abrir ' + it.numero + ' ' + it.titulo);
-    c.addEventListener('click', function () { abrirInstancia(it); });
+    c.addEventListener('click', function (e) {
+      var a = it.tr && it.tr.querySelector('a[href]');
+      var url = it.href || (a && a.getAttribute('href'));
+      abrirComTecla(e, url, it.numero + ' \u00b7 ' + it.titulo, function () { abrirInstancia(it); });
+    });
     c.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrirInstancia(it); }
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); c.click(); }
     });
     var top = el('div', 'lcbk-top');
     top.appendChild(el('span', 'lcbk-num', it.numero));
