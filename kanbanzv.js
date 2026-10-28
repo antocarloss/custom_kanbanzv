@@ -75,6 +75,15 @@
                     ['vPDFParaAutor', 'diretor financeiro'], ['vPDFParaAdvogado', 'diretor financeiro'], ['vPDFParaAdvogadoContratual', 'diretor financeiro'],
                     ['vSPAutor', '2\u00aa proposta'], ['vSPAdvogadoContratual', '2\u00aa proposta'],
                     ['vPPAutor', '1\u00aa proposta'], ['vPPAdvogadoContratual', '1\u00aa proposta']],
+        // Advogado Sucumbencial: nomes exatos do formul\u00e1rio (Filho Adv). Cada proposta: [valor, des\u00e1gio, r\u00f3tulo].
+        // Uma proposta igual ao valor de face com des\u00e1gio 0 \u00e9 preenchimento autom\u00e1tico do formul\u00e1rio: ignorada.
+        sucumbencial: {
+          face: ['valorDeFaceDosHononariosSucumbenciais', 'vTHS'],
+          propostas: [['vPDFAdvogadoSucumbencia', 'dPDFAdvogadoSucumbencia', 'diretor financeiro'],
+                      ['vSPAdvogadoSucumbencia', 'dSPAdvogadoSucumbencia', '2\u00aa proposta'],
+                      ['vPPAdvogadoSucumbencia', 'dPPAdvogadoSucumbencia', '1\u00aa proposta']],
+          numeroProposta: ['numeroPropostaFundoAdvSucumbencial']
+        },
         tipo: ['tipoDeAtivo'],
         numeroProposta: ['numeroPropostaFundo'],
         fundo: ['fundoResponsavelAutor', 'fundoResponsavelAdvogado'],
@@ -2135,6 +2144,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var ix = function (nome) { return h.indexOf(nome); };
     var iSol = ix('N\u00famero da solicita\u00e7\u00e3o');
     var candProp = [];
+    // pareceres das propostas do sucumbencial: qual proposta cada um avalia (DF, 2\u00aa ou 1\u00aa)
+    var parecerSuc = [];
+    h.forEach(function (n, i) {
+      if (!/parecer/i.test(n) || !/sucumb/i.test(n)) return;
+      var qual = /PDF|DF|diretor/i.test(n) ? 'pdf' : /SP|segund/.test(n) || /segund/i.test(n) ? 'sp' : 'pp';
+      parecerSuc.push({ i: i, qual: qual });
+    });
     // "Valor de Face" de partes que n\u00e3o s\u00e3o o autor nem o advogado contratual (vF..., ex.: sucumbencial)
     var candFace = [];
     h.forEach(function (n, i) {
@@ -2143,7 +2159,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     h.forEach(function (n, i) {
       if (!/propost/i.test(n) && !/^vP[A-Z]|^vSP|^vPDF/.test(n)) return;
       if (/^p[A-Z]|^d[A-Z]|^jR/.test(n)) return;                    // % , des\u00e1gio e juros (pPP, dPP, jRPP)
-      if (/numero|n[u\u00fa]mero|parecer|justific|des[a\u00e1]gio|anexo|img|pdf$|txt|canva|evidenc|print|descri|motivo|observ|status|data|prazo|fundo/i.test(n)) return;
+      if (/numero|n[u\u00fa]mero|parecer|justific|des[a\u00e1]gio|anexo|img|pdf$|txt|canva|evidenc|print|descri|motivo|observ|status|data|prazo|fundo|face|sucumb/i.test(n)) return;
       var rank = /corrig/i.test(n) ? 0 : /novo|nova/i.test(n) ? 1 : /pdf|diretor|\bdf/i.test(n) ? 2 : /segund|^vSP/i.test(n) ? 3 : 4;
       var rot = ['corrigida', 'nova proposta', 'diretor financeiro', '2\u00aa proposta', 'proposta'][rank];
       candProp.push({ i: i, rank: rank, rot: rot });
@@ -2160,7 +2176,38 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         var k = ix(F.propostas[i][0]);
         if (k >= 0 && parseValor(r[k])) { o.prop = parseValor(r[k]); o.propRot = F.propostas[i][1]; break; }
       }
-      // Fluxos/partes com outros nomes de campo (ex.: Advogado Sucumbencial): procura qualquer
+      // Advogado Sucumbencial (nomes exatos)
+      if (!o.prop && F.sucumbencial) {
+        var S = F.sucumbencial, faceS = parseValor(pega(r, S.face));
+        // 1\u00ba crit\u00e9rio: a proposta cujo PARECER \u00e9 "Proposta Aceita" (mais recente primeiro: DF > 2\u00aa > 1\u00aa)
+        var aceitas = {};
+        parecerSuc.forEach(function (ps) { if (/aceit/i.test(clean(r[ps.i])) && !/n[a\u00e3]o aceit|recus/i.test(clean(r[ps.i]))) aceitas[ps.qual] = 1; });
+        ['pdf', 'sp', 'pp'].some(function (qual, qi) {
+          if (!aceitas[qual]) return false;
+          var kq = ix(S.propostas[qi][0]), vq = kq >= 0 ? parseValor(r[kq]) : 0;
+          if (!vq) return false;
+          o.prop = vq; o.propRot = S.propostas[qi][2];
+          if (faceS) { o.face = faceS; o.faceRot = 'honor\u00e1rios'; }
+          if (!o.nProp) o.nProp = semDoc(pega(r, S.numeroProposta));
+          return true;
+        });
+      }
+      // 2\u00ba crit\u00e9rio (sem parecer): a mais recente preenchida, ignorando o preenchimento autom\u00e1tico
+      if (!o.prop && F.sucumbencial) {
+        var S = F.sucumbencial, faceS = parseValor(pega(r, S.face));
+        for (var si = 0; si < S.propostas.length; si++) {
+          var kv = ix(S.propostas[si][0]), kd = ix(S.propostas[si][1]);
+          var vs = kv >= 0 ? parseValor(r[kv]) : 0;
+          if (!vs) continue;
+          var ds = kd >= 0 && clean(r[kd]) !== '' ? parseValor(r[kd]) : null;
+          if (faceS && ds === 0 && Math.abs(vs - faceS) < 0.01) continue;   // preenchimento autom\u00e1tico
+          o.prop = vs; o.propRot = S.propostas[si][2];
+          if (faceS) { o.face = faceS; o.faceRot = 'honor\u00e1rios'; }
+          if (!o.nProp) o.nProp = semDoc(pega(r, S.numeroProposta));
+          break;
+        }
+      }
+      // Fluxos/partes com outros nomes de campo: procura qualquer
       // coluna de VALOR de proposta e fica com a mais recente (corrigida > nova > diretor financeiro > 2\u00aa > demais).
       if (!o.prop) {
         var melhor = null;
