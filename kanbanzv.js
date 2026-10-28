@@ -65,6 +65,23 @@
       // Perdida "pelo jur\u00eddico" = a negocia\u00e7\u00e3o passou por uma destas tarefas (reprova\u00e7\u00e3o):
       // T11 Analisar Reprova\u00e7\u00e3o, T15 Analisar Recusa da Reprova\u00e7\u00e3o, T16 Conselho. Sen\u00e3o, "pelo cliente".
       perdaJuridico: ['T11', 'T15', 'T16'],
+      // Campos do formul\u00e1rio das negocia\u00e7\u00f5es (export de solicita\u00e7\u00f5es do Zeev). Lista branca:
+      // s\u00f3 estes s\u00e3o lidos; CPF, endere\u00e7o, telefone e o resto s\u00e3o descartados na leitura.
+      // Propostas: da mais recente para a mais antiga (a 1\u00aa preenchida \u00e9 a vigente).
+      form: {
+        face: ['vTA', 'vTHC'],
+        propostas: [['vPAutorCorrigida', 'corrigida'], ['vPAdvCCorrigida', 'corrigida'], ['vPAdvogadoContratualCorrigida', 'corrigida'],
+                    ['vPDFParaAutor', 'diretor financeiro'], ['vPDFParaAdvogado', 'diretor financeiro'], ['vPDFParaAdvogadoContratual', 'diretor financeiro'],
+                    ['vSPAutor', '2\u00aa proposta'], ['vSPAdvogadoContratual', '2\u00aa proposta'],
+                    ['vPPAutor', '1\u00aa proposta'], ['vPPAdvogadoContratual', '1\u00aa proposta']],
+        tipo: ['tipoDeAtivo'],
+        numeroProposta: ['numeroPropostaFundo'],
+        fundo: ['fundoResponsavelAutor', 'fundoResponsavelAdvogado'],
+        motivoJuridico: ['motivoDaReprovacaoProcessualDocumental', 'justificativaDiretoraJuridica', 'JustificativaCEO',
+                         'justificativaDaRecusa', 'parecerSobreReprovacaoCEO', 'parecerSobreRecusaDiretoraJuridica', 'parecerDaReprovacao'],
+        motivoCliente: ['justificativaNegociacaoCanceladaCliente', 'justificativaDoCancelamentoCliente', 'justificativaDoCancelamento',
+                        'justificativaDaRecusaDiretorFinanceiro', 'justificativaDoCancelamenoDiretorFinanceiro']
+      },
       // Filho: tarefas que s\u00f3 existem DEPOIS do aceite (entrou na T07) e antes da cess\u00e3o (T23/T24)
       posAceite: ['T07', 'T08', 'T09', 'T10', 'T11', 'T12', 'T13', 'T14', 'T14.01', 'T15', 'T16',
                   'T17', 'T18', 'T19', 'T20', 'T21', 'T22']            // se a SDR for a solicitante do Filho, o dono \u00e9 quem fez a T01-Negociar Compra
@@ -807,7 +824,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       : n >= 1e3 ? 'R$ ' + Math.round(n / 1e3).toLocaleString('pt-BR') + ' mil' : 'R$ ' + Math.round(n).toLocaleString('pt-BR');
   }
   function mascararCpf(cpf) { return '***.' + cpf.slice(4, 11) + '-**'; }
-  function blocoInfo(c, info, comNome) {
+  function blocoInfo(c, info, comNome, colId) {
     if (!info) return;
     if (comNome && info.nome) c.appendChild(el('div', 'lcbk-cli', info.nome));
     if (info.cpf) {
@@ -838,9 +855,25 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       pr.title = 'Processo ' + info.procNum;
       c.appendChild(pr);
     }
-    if (info.proposta) linhas.push(['Proposta', info.proposta, info.propostaRot, 'is-valor']);
-    if (info.face) linhas.push(['Valor de face', info.face, '', 'is-valor']);
-    if (!linhas.length) return;
+    var aceita = ['fecCom', 'cessao', 'fechados'].indexOf(colId) !== -1;
+    if (info.nProp || info.fundo) {
+      c.appendChild(el('div', 'lcbk-proc', (info.nProp ? 'Proposta n\u00ba ' + info.nProp : '') +
+        (info.nProp && info.fundo ? ' \u00b7 ' : '') + (info.fundo || '')));
+    }
+    var perdidaCol = /^perd/.test(colId || '');
+    var rotProp = aceita ? 'Proposta aceita' : perdidaCol ? '\u00daltima proposta' : 'Proposta vigente';
+    if (info.face) linhas.push(['Valor de face (vTA)', info.face, '', 'is-face']);
+    if (info.proposta) linhas.push([rotProp, info.proposta, info.propostaRot, 'is-valor']);
+    else if (info.semProposta) linhas.push([rotProp, 'sem proposta registrada', '', 'is-vazio']);
+    if (info.desagio != null) linhas.push(['Des\u00e1gio', (info.desagio * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%', '', 'is-desagio']);
+    var elMot = null;
+    if (perdidaCol) {
+      var mot = colId === 'perdJur' ? (info.motJur || info.motCli) : (info.motCli || info.motJur);
+      mot = (mot || '').replace(/[\s,;:\u2013-]+$/, '');
+      elMot = el('div', 'lcbk-motivo', mot ? 'Motivo: ' + mot : 'Motivo n\u00e3o informado no formul\u00e1rio');
+      if (mot) elMot.title = mot;
+    }
+    if (!linhas.length) { if (elMot) c.appendChild(elMot); return; }
     var g = el('dl', 'lcbk-info');
     linhas.forEach(function (l) {
       g.appendChild(el('dt', null, l[0]));
@@ -849,6 +882,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       g.appendChild(dd);
     });
     c.appendChild(g);
+    if (elMot) c.appendChild(elMot);
   }
   function chipTipo(tags, info) {
     if (info && info.tipo) tags.appendChild(el('span', 'lcbk-chip is-ativo', info.tipo));
@@ -1332,6 +1366,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-busca-vazia{grid-column:1 / -1;font-size:13px;color:#404857;background:#fff;border:1px dashed #c9cfda;border-radius:10px;padding:18px;margin:0}',
       '.lcbk-comigo.is-on{background:#1b2f5c;color:#fff;border-color:#1b2f5c}',
       '.lcbk-soma{color:#2e7d4f!important;font-weight:600}',
+      '.lcbk-info dd.is-face{color:#2e7d4f;font-weight:700;font-variant-numeric:tabular-nums}',
+      '.lcbk-info dd.is-desagio{color:#b8860b;font-weight:700}',
+      '.lcbk-info dd.is-vazio{color:#6b778c;font-style:italic;font-weight:400}',
+      '.lcbk-soma.is-prop{color:#1b2f5c!important}',
+      '.lcbk-motivo{margin-top:6px;font-size:11.5px;line-height:1.35;color:#a1281f;background:#fbeceb;border-radius:6px;padding:6px 8px}',
       '.lcbk-mais{width:100%;margin-top:4px;background:#fff}',
       '.lcbk-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#404857;cursor:pointer}',
       '.lcbk-chip.is-area{background:#f1f2f5;color:#404857}',
@@ -1948,7 +1987,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     c.appendChild(el('div', 'lcbk-title', it.titulo));
     if (it.processo) c.appendChild(el('div', 'lcbk-app', it.processo));
     if (it.atividade) c.appendChild(el('div', 'lcbk-app lcbk-atv', it.atividade));
-    blocoInfo(c, it.info, false);
+    blocoInfo(c, it.info, false, it._col && it._col.id);
     var tags = el('div', 'lcbk-tags');
     tags.appendChild(el('span', 'lcbk-tipo is-' + it.tipo, NOME_TIPO[it.tipo] || NOME_TIPO.pai));
     chipTipo(tags, it.info);
@@ -2066,6 +2105,78 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       res.itens.forEach(function (x) { acc.push(x); });
     });
   }
+  // \u2550\u2550\u2550 VALORES E MOTIVOS (formul\u00e1rio das negocia\u00e7\u00f5es) \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+  function parseValor(v) {
+    v = String(v || '').replace(/[^\d,.-]/g, '');
+    if (!v) return 0;
+    if (/,\d{1,2}$/.test(v)) return parseFloat(v.replace(/\./g, '').replace(',', '.')) || 0;
+    if (/\.\d{1,2}$/.test(v) && v.indexOf(',') === -1) return parseFloat(v.replace(/,/g, '')) || 0;
+    return parseFloat(v.replace(/[.,]/g, '')) || 0;
+  }
+  function moedaBR(n) { return 'R$ ' + Math.round(n).toLocaleString('pt-BR'); }
+  var FORM = { porSol: {}, carregando: false, erro: '', em: null, base: '', incompleto: 0 };
+  function lerFormCsv(txt, por) {
+    var linhas = lerCsv(txt);
+    if (!linhas.length) return 0;
+    var h = linhas[0].map(clean), F = CFG.producao.form;
+    var ix = function (nome) { return h.indexOf(nome); };
+    var iSol = ix('N\u00famero da solicita\u00e7\u00e3o');
+    var pega = function (r, nomes) {
+      for (var i = 0; i < nomes.length; i++) { var k = ix(nomes[i]); if (k >= 0 && clean(r[k])) return clean(r[k]); }
+      return '';
+    };
+    linhas.slice(1).forEach(function (r) {
+      var sol = digits(r[iSol]);
+      if (!sol) return;
+      var o = { face: parseValor(pega(r, F.face)) };
+      for (var i = 0; i < F.propostas.length; i++) {
+        var k = ix(F.propostas[i][0]);
+        if (k >= 0 && parseValor(r[k])) { o.prop = parseValor(r[k]); o.propRot = F.propostas[i][1]; break; }
+      }
+      o.tipo = semDoc(pega(r, F.tipo));
+      o.nProp = semDoc(pega(r, F.numeroProposta));
+      o.fundo = semDoc(pega(r, F.fundo));
+      var corta = function (t) { t = semDoc(t); return t.length > 220 ? t.slice(0, 217) + '\u2026' : t; };
+      o.motJur = corta(pega(r, F.motivoJuridico));
+      o.motCli = corta(pega(r, F.motivoCliente));
+      por[sol] = o;
+    });
+    return linhas.length - 1;
+  }
+  function carregarFormularios() {
+    if (FORM.carregando || !LC.url) return;
+    FORM.carregando = true; FORM.erro = ''; FORM.incompleto = 0;
+    var base = LC.base || baseDe(LC.url), por = {};
+    var filhos = CFG.producao.fluxos.filter(function (f) { return f[2] === 'filho'; });
+    var i = 0;
+    function prox() {
+      if (i >= filhos.length) return Promise.resolve();
+      var f = filhos[i++], u = new URL(base);
+      u.pathname = u.pathname.replace(/\/instances\/?$/, '/instances/export/requests/csvsemicolon');
+      ['pagenumber', 'recordsperpage', 'keyword'].forEach(function (k) { u.searchParams.delete(k); });
+      u.searchParams.set('codFlowsOrServices', f[0] + ';' + f[1] + ';0;0');
+      return getJson(u.href).then(function (j) {
+        var n = lerFormCsv(decodificar(j && j.success && j.success.fileContent), por);
+        if (n >= CFG.producao.limiteLinhas) FORM.incompleto++;
+      }).then(prox);
+    }
+    prox().then(function () { FORM.porSol = por; FORM.em = new Date(); FORM.base = base; })
+      .catch(function (e) { FORM.erro = (e && e.message) || 'erro'; })
+      .then(function () { FORM.carregando = false; if (uiI.board) renderInst(); });
+  }
+  function enriquecer(it) {
+    var f = FORM.porSol[it.num];
+    if (!f) return;
+    var inf = it.info || (it.info = {});
+    if (f.face) { inf.faceN = f.face; inf.face = moedaBR(f.face); }
+    if (f.prop) { inf.propN = f.prop; inf.proposta = moedaBR(f.prop); inf.propostaRot = f.propRot; }
+    else if (f.face) { inf.semProposta = true; }
+    if (f.face && f.prop) inf.desagio = Math.max(0, 1 - f.prop / f.face);
+    if (f.tipo && !inf.tipo) inf.tipo = f.tipo;
+    inf.nProp = f.nProp; inf.fundo = f.fundo;
+    inf.motJur = f.motJur; inf.motCli = f.motCli;
+  }
+
   var PERDA = { porSol: null, carregando: false, erro: '', em: null, consultas: 0, incompleto: 0 };
   function carregarMotivosPerda() {
     if (PERDA.carregando) return;
@@ -2464,6 +2575,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     // s\u00f3 entram processos em etapas do jur\u00eddico (a menos que "Mostrar outras \u00e1reas" esteja marcado).
     var foraDaArea = 0, foraDoTime = 0;
     var buscando = !!stInst.busca;
+    if (layoutId === 'comercial' && lidos.some(function (it) { return it.tipo === 'filho'; })) {
+      var velhoF = !FORM.em || FORM.base !== LC.base || Date.now() - FORM.em.getTime() > 10 * 60000;
+      if (velhoF && !FORM.carregando && !(FORM.erro && FORM.base === LC.base)) setTimeout(carregarFormularios, 0);
+      lidos.forEach(enriquecer);
+    }
     if (buscando && LB.q === stInst.busca && LB.itens.length) {       // junta o que o Zeev achou
       var ja = {};
       lidos.forEach(function (it) { ja[it.num] = 1; });
@@ -2529,7 +2645,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var h = el('div');
       h.appendChild(el('h3', null, c.name));
       var n = list.length;
-      var somaFace = list.reduce(function (a, it) { return a + valorNum((it.info || {}).face); }, 0);
+      var somaFace = list.reduce(function (a, it) { var f = it.info || {}; return a + (f.faceN || valorNum(f.face)); }, 0);
+      var somaProp = list.reduce(function (a, it) { return a + ((it.info || {}).propN || 0); }, 0);
       if (somaFace && !c.dica) c.dica = '';
       if (c.id === colTotal) {
         n = totalLista;
@@ -2548,7 +2665,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         h.appendChild(sm2);
       } else if (c.dica != null) {
         if (c.dica) h.appendChild(el('small', null, c.dica));
-        if (somaFace) h.appendChild(el('small', 'lcbk-soma', moedaCurta(somaFace) + ' em valor de face'));
+        if (somaFace) h.appendChild(el('small', 'lcbk-soma', moedaBR(somaFace) + ' em vTA'));
+        if (somaProp && ['fecCom', 'cessao', 'fechados'].indexOf(c.id) !== -1) h.appendChild(el('small', 'lcbk-soma is-prop', moedaBR(somaProp) + ' em propostas aceitas'));
       }
       head.appendChild(h);
       head.appendChild(el('span', 'lcbk-count', fmtN(n)));
@@ -2639,7 +2757,15 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var total = totalZeev();
     var parcial = total && total > lidos.length && !(completo && !LC.completo.limitado);
     var vazia = L.esteira && !todos.length && foraDaArea;
-    uiI.aviso.textContent = vazia
+    // esteira comercial numa lista sem nenhuma negocia\u00e7\u00e3o (Filho): explica onde est\u00e1 o funil
+    var semNeg = layoutId === 'comercial' && !buscando && lidos.length >= 30 &&
+      !lidos.some(function (it) { return it.tipo === 'filho'; });
+    uiI.aviso.textContent = semNeg
+      ? 'Esta lista n\u00e3o tem nenhuma negocia\u00e7\u00e3o (fluxos Filho): por isso Fechado comercialmente, Fechados e Perdidas aparecem zerados. ' +
+        (EH_GESTOR || CFG.pathGestor.test(location.pathname)
+          ? 'Confira o filtro do Zeev: ele pode estar limitando a lista a um fluxo s\u00f3.'
+          : 'Acompanhar solicita\u00e7\u00f5es mostra s\u00f3 as solicita\u00e7\u00f5es ligadas a voc\u00ea. Para ver o funil comercial de todos, use Monitorar > Solicita\u00e7\u00f5es.')
+      : vazia
       ? 'Nenhum dos ' + lidos.length + ' processos desta p\u00e1gina est\u00e1 numa etapa da ' + L.nome + '. ' +
         (parcial ? 'A lista tem ' + fmtN(total) + ' processos e o Zeev s\u00f3 carregou esta p\u00e1gina: use o Filtrar do Zeev (por exemplo, fluxo Filho e status Em andamento) para trazer os processos desta esteira.' : 'Marque "Mostrar outras \u00e1reas" para ver onde eles est\u00e3o.')
       : parcial ? 'Mostrando ' + lidos.length + ' de ' + fmtN(total) +
@@ -2649,7 +2775,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         ' (limite de ' + fmtN(CFG.lista.maxItens) + ' para n\u00e3o pesar no Zeev). Filtre a lista para ter os n\u00fameros completos.';
     }
     if (LC.erro) uiI.aviso.textContent = 'Lista completa: ' + LC.erro + '. Mostrando s\u00f3 a p\u00e1gina atual.';
-    uiI.aviso.style.display = (vazia || (parcial && !colTotal) || LC.erro || (completo && LC.completo.limitado)) &&
+    uiI.aviso.style.display = (semNeg || vazia || (parcial && !colTotal) || LC.erro || (completo && LC.completo.limitado)) &&
       stInst.view === 'kanban' ? '' : 'none';
     // bot\u00e3o de carregar tudo
     var falta = !completo && total && total > lidos.length && LC.url;
@@ -2668,6 +2794,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       (foraDaArea ? ' | ' + foraDaArea + ' em outras \u00e1reas' : '') +
       (foraDoTime ? ' | ' + foraDoTime + ' de outros times' : '') +
       (buscando ? ' | busca: ' + achados + ' encontrado(s)' + (LB.carregando ? ', procurando no Zeev\u2026' : '') : '') +
+      (layoutId === 'comercial' ? (FORM.carregando ? ' | lendo valores das negocia\u00e7\u00f5es\u2026' : FORM.erro ? ' | valores indispon\u00edveis (' + FORM.erro + ')' :
+        FORM.incompleto ? ' | valores: export cortado em 1.000 linhas' : '') : '') +
       (stInst.comigo ? ' | s\u00f3 comigo' + (MEU.erro ? ' (n\u00e3o foi poss\u00edvel ler suas tarefas)' : '') : '') + ' | Kanban ' + VERSAO +
       (ocultos ? ' | ' + ocultos + ' oculto(s) pela busca' : '');
     document.documentElement.classList.toggle('lcbk-on', stInst.view === 'kanban');
