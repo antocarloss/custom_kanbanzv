@@ -64,7 +64,10 @@
       sdr: ['Raphisa'],
       // Perdida "pelo jur\u00eddico" = a negocia\u00e7\u00e3o passou por uma destas tarefas (reprova\u00e7\u00e3o):
       // T11 Analisar Reprova\u00e7\u00e3o, T15 Analisar Recusa da Reprova\u00e7\u00e3o, T16 Conselho. Sen\u00e3o, "pelo cliente".
-      perdaJuridico: ['T11', 'T15', 'T16']            // se a SDR for a solicitante do Filho, o dono \u00e9 quem fez a T01-Negociar Compra
+      perdaJuridico: ['T11', 'T15', 'T16'],
+      // Filho: tarefas que s\u00f3 existem DEPOIS do aceite (entrou na T07) e antes da cess\u00e3o (T23/T24)
+      posAceite: ['T07', 'T08', 'T09', 'T10', 'T11', 'T12', 'T13', 'T14', 'T14.01', 'T15', 'T16',
+                  'T17', 'T18', 'T19', 'T20', 'T21', 'T22']            // se a SDR for a solicitante do Filho, o dono \u00e9 quem fez a T01-Negociar Compra
     },
 
     // Vis\u00e3o do gestor: s\u00f3 nesta p\u00e1gina (Monitorar > Solicita\u00e7\u00f5es). Quem controla o acesso \u00e9 a
@@ -1635,8 +1638,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       nome: CFG.esteiras[id].nome,
       esteira: id,
       cols: function () {
-        return colunasEsteira(id).map(function (c) { c.precisaB = false; return c; })
-          .concat([{ id: 'cessao', name: 'Fundo & Cess\u00e3o', dica: 'T23 e T24 em andamento' },
+        return colunasEsteira(id).filter(function (c) { return ['ppp', 'negociacao', 'proposta'].indexOf(c.id) !== -1; })
+          .map(function (c) { c.precisaB = false; return c; })
+          .concat([{ id: 'fecCom', name: 'Fechado comercialmente', ok: true, dica: 'proposta aceita, em formaliza\u00e7\u00e3o (T07 a T22)' },
+                   { id: 'cessao', name: 'Fundo & Cess\u00e3o', dica: 'T23 e T24 em andamento' },
                    { id: 'fechados', name: 'Fechados (cess\u00e3o)', ok: true, dica: 'passou da T24 ou conclu\u00edda', encerrada: true },
                    { id: 'perdJur', name: 'Perdidas \u00b7 rejeitada pelo jur\u00eddico', alert: true, dica: 'passou pela reprova\u00e7\u00e3o (T11, T15 ou T16)', encerrada: true },
                    { id: 'perdCli', name: 'Perdidas \u00b7 rejeitada pelo cliente', alert: true, dica: 'cancelada ou recusada pelo cliente', encerrada: true },
@@ -1645,7 +1650,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
                    { id: 'outros', name: 'Outras \u00e1reas', opcional: true, outras: true }]);
       },
       place: function (it) {
-        if (it.tipo !== 'filho') return it.ativo ? colunaDe(id, it) : 'outros';
+        if (it.tipo !== 'filho') {
+          var c1 = it.ativo ? colunaDe(id, it) : 'outros';
+          return ['ppp', 'negociacao', 'proposta'].indexOf(c1) !== -1 ? c1 : 'outros';
+        }
         if (!it.ativo) {
           if (!perdida(it)) return 'fechados';
           if (!PERDA.porSol && !PERDA.carregando && !PERDA.erro) setTimeout(carregarMotivosPerda, 0);
@@ -1656,7 +1664,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         }
         if (it.stage === 'pos') return 'fechados';
         if (it.stage === 'cessao') return 'cessao';
-        return colunaDe(id, it);
+        if (CFG.producao.posAceite.indexOf(codigoDe(it.atividade)) !== -1) return 'fecCom';
+        var c2 = colunaDe(id, it);
+        return ['ppp', 'negociacao', 'proposta'].indexOf(c2) !== -1 ? c2 : 'outros';
       }
     };
     return {
