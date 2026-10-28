@@ -856,16 +856,12 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       c.appendChild(pr);
     }
     var aceita = ['fecCom', 'cessao', 'fechados'].indexOf(colId) !== -1;
-    if (info.nProp || info.fundo) {
-      c.appendChild(el('div', 'lcbk-proc', (info.nProp ? 'Proposta n\u00ba ' + info.nProp : '') +
-        (info.nProp && info.fundo ? ' \u00b7 ' : '') + (info.fundo || '')));
-    }
+
     var perdidaCol = /^perd/.test(colId || '');
     var rotProp = aceita ? 'Proposta aceita' : perdidaCol ? '\u00daltima proposta' : 'Proposta vigente';
     if (info.face) linhas.push(['Valor de face (vTA)', info.face, '', 'is-face']);
-    if (info.proposta) linhas.push([rotProp, info.proposta, info.propostaRot, 'is-valor']);
-    else if (info.semProposta) linhas.push([rotProp, 'sem proposta registrada', '', 'is-vazio']);
-    if (info.desagio != null) linhas.push(['Des\u00e1gio', (info.desagio * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%', '', 'is-desagio']);
+    if (info.proposta) linhas.push([rotProp, info.proposta, '', 'is-valor']);
+    else if (info.semProposta) linhas.push([rotProp, 'sem proposta', '', 'is-vazio']);
     var elMot = null;
     if (perdidaCol) {
       var mot = colId === 'perdJur' ? (info.motJur || info.motCli) : (info.motCli || info.motJur);
@@ -1184,6 +1180,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-on .crud-list-table{display:none!important}',
       '.lcbk-on .lcbk-oculto{display:none!important}',
       '.lcbk-board{display:none}',
+      '.lcbk-on .lcbk-board.lcbk-largo{grid-template-columns:repeat(var(--lcbk-cols,4),minmax(270px,1fr))}',
       '.lcbk-on .lcbk-board{display:grid;grid-template-columns:repeat(var(--lcbk-cols,4),minmax(210px,1fr));gap:12px;overflow-x:auto;padding:4px 0 12px}',
       '.lcbk-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 12px}',
       '.lcbk-tools{display:flex;flex-wrap:wrap;gap:10px;align-items:center;flex:1}',
@@ -1344,7 +1341,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-painel-head span.is-err{color:#a1281f}',
       '.lcbk-nota{font-size:11.5px;color:#6b778c;margin:8px 2px 0}',
       '.lcbk-cli{font-size:12.5px;font-weight:600;color:#1b2f5c;margin-top:3px}',
-      '.lcbk-info{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;margin:7px 0 2px;padding:7px 9px;background:#f6f8fb;border-radius:6px;font-size:12px}',
+      '.lcbk-info{display:grid;grid-template-columns:1fr auto;gap:3px 10px;margin:7px 0 2px;padding:7px 9px;background:#f6f8fb;border-radius:6px;font-size:12px;align-items:baseline}',
+      '.lcbk-info dd{white-space:nowrap}',
       '.lcbk-info dt{color:#6b778c;margin:0}',
       '.lcbk-info dd{margin:0;color:#172b4d;text-align:right;word-break:break-word}',
       '.lcbk-info dd.is-valor{font-weight:700;font-variant-numeric:tabular-nums}',
@@ -1677,9 +1675,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       nome: CFG.esteiras[id].nome,
       esteira: id,
       cols: function () {
-        return colunasEsteira(id).filter(function (c) { return ['ppp', 'negociacao', 'proposta'].indexOf(c.id) !== -1; })
+        return colunasEsteira(id).filter(function (c) { return ['ppp', 'negociacao', 'proposta', 'pendencias'].indexOf(c.id) !== -1; })
           .map(function (c) { c.precisaB = false; return c; })
-          .concat([{ id: 'fecCom', name: 'Fechado comercialmente', ok: true, dica: 'proposta aceita, em formaliza\u00e7\u00e3o (T07 a T22)' },
+          .concat([{ id: 'fecCom', name: 'Fechado comercialmente', ok: true, dica: 'proposta aceita, em formaliza\u00e7\u00e3o (fora as pend\u00eancias)' },
                    { id: 'cessao', name: 'Fundo & Cess\u00e3o', dica: 'T23 e T24 em andamento' },
                    { id: 'fechados', name: 'Fechados (cess\u00e3o)', ok: true, dica: 'passou da T24 ou conclu\u00edda', encerrada: true },
                    { id: 'perdJur', name: 'Perdidas \u00b7 rejeitada pelo jur\u00eddico', alert: true, dica: 'passou pela reprova\u00e7\u00e3o (T11, T15 ou T16)', encerrada: true },
@@ -1691,7 +1689,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       place: function (it) {
         if (it.tipo !== 'filho') {
           var c1 = it.ativo ? colunaDe(id, it) : 'outros';
-          return ['ppp', 'negociacao', 'proposta'].indexOf(c1) !== -1 ? c1 : 'outros';
+          return ['ppp', 'negociacao', 'proposta', 'pendencias'].indexOf(c1) !== -1 ? c1 : 'outros';
         }
         if (!it.ativo) {
           if (!perdida(it)) return 'fechados';
@@ -1703,8 +1701,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         }
         if (it.stage === 'pos') return 'fechados';
         if (it.stage === 'cessao') return 'cessao';
-        if (CFG.producao.posAceite.indexOf(codigoDe(it.atividade)) !== -1) return 'fecCom';
         var c2 = colunaDe(id, it);
+        if (c2 === 'pendencias') return 'pendencias';
+        if (CFG.producao.posAceite.indexOf(codigoDe(it.atividade)) !== -1) return 'fecCom';
         return ['ppp', 'negociacao', 'proposta'].indexOf(c2) !== -1 ? c2 : 'outros';
       }
     };
@@ -1756,6 +1755,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
 
   // \u2550\u2550\u2550 LISTA COMPLETA (todas as p\u00e1ginas da consulta atual) \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
   var LC = { url: '', base: '', completo: null, carregando: false, cancelar: false, prog: '', erro: '' };
+  // URLs das consultas feitas pelo PR\u00d3PRIO Kanban: n\u00e3o podem ser lidas como "o Zeev trocou o filtro"
+  var NOSSAS = {}, nNossas = 0;
+  function nossa(href) { if (++nNossas > 4000) { NOSSAS = {}; nNossas = 1; } NOSSAS[href] = 1; return href; }
+  function ehNossa(href) { return !!NOSSAS[href]; }
   function baseDe(u) {
     try { var x = new URL(u, location.origin); x.searchParams.delete('pagenumber'); x.searchParams.delete('recordsperpage'); return x.href; }
     catch (e) { return ''; }
@@ -1774,7 +1777,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       LB.urls[u.href] = 1;
       LB.q = q; LB.carregando = true; LB.erro = '';
       renderInst();
-      getJson(u.href).then(function (j) {
+      getJson(nossa(u.href)).then(function (j) {
         if (LB.q !== q) return;
         LB.itens = (((j && j.success) || {}).itens || []).map(function (x) { var it = daApi(x); it._busca = true; return it; });
       }).catch(function (e) {
@@ -1807,7 +1810,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     try {
       var x = new URL(u, location.origin);
       if (x.origin !== location.origin || !CFG.lista.padrao.test(x.pathname + x.search)) return;
-      if (LB.urls[x.href]) return;                           // nossas buscas por palavra-chave
+      if (LB.urls[x.href] || ehNossa(x.href)) return;        // consultas do pr\u00f3prio Kanban
       var b = baseDe(x.href);
       if (LC.carregando && b === LC.base) return;            // s\u00e3o as nossas pr\u00f3prias consultas
       if (LC.carregando) LC.cancelar = true;                  // filtro mudou no meio da carga: para a antiga
@@ -1872,18 +1875,19 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       if (LC.cancelar) setTimeout(agendarAuto, 50);          // come\u00e7a a carga da lista nova
       if (msg) { LC.erro = msg; LC.completo = null; }
       else if (!LC.cancelar) {
+        LC.reinicios = 0;
         LC.completo = { base: base, itens: itens, em: new Date(), total: total,
                         limitado: !!(total && total > itens.length && itens.length >= CFG.lista.maxItens) };
       }
       renderInst();
     }
     function proxima() {
-      if (LC.cancelar) return fim('');
+      if (LC.cancelar || base !== LC.base) { LC.cancelar = true; return fim(''); }
       LC.prog = 'Carregando ' + fmtN(itens.length) + (total ? ' de ' + fmtN(total) : '') + '\u2026';
       renderInst();
       u.searchParams.set('pagenumber', String(p));
       u.searchParams.set('recordsperpage', String(rpp));
-      getJson(u.href).then(function (j) {
+      getJson(nossa(u.href)).then(function (j) {
         var sx = j && j.success, lote = (sx && sx.itens) || [];
         // o Zeev pode limitar o tamanho da p\u00e1gina: a 1\u00aa resposta diz o tamanho real
         if (p === 1 && sx && sx.hasmoreitens && lote.length && lote.length < rpp) rpp = lote.length;
@@ -1892,6 +1896,14 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
           if (it.num && !vistos[it.num]) { vistos[it.num] = 1; itens.push(it); }
         });
         if (!sx || !sx.hasmoreitens || !lote.length || itens.length >= CFG.lista.maxItens) return fim('');
+        // carregou mais do que a lista da p\u00e1gina tem: est\u00e1 lendo outra lista. Para e recome\u00e7a (at\u00e9 2 vezes).
+        var tAgora = totalZeev();
+        if (tAgora && itens.length > tAgora + rpp) {
+          LC.reinicios = (LC.reinicios || 0) + 1;
+          if (LC.reinicios > 2) return fim('a lista mudou durante a carga; clique em Atualizar');
+          LC.cancelar = true;
+          return fim('');
+        }
         p++;
         setTimeout(proxima, 120);                          // sem rajada no servidor
       }).catch(function (e) { fim('n\u00e3o foi poss\u00edvel carregar a lista completa (' + (e && e.message) + ')'); });
@@ -2155,7 +2167,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       u.pathname = u.pathname.replace(/\/instances\/?$/, '/instances/export/requests/csvsemicolon');
       ['pagenumber', 'recordsperpage', 'keyword'].forEach(function (k) { u.searchParams.delete(k); });
       u.searchParams.set('codFlowsOrServices', f[0] + ';' + f[1] + ';0;0');
-      return getJson(u.href).then(function (j) {
+      return getJson(nossa(u.href)).then(function (j) {
         var n = lerFormCsv(decodificar(j && j.success && j.success.fileContent), por);
         if (n >= CFG.producao.limiteLinhas) FORM.incompleto++;
       }).then(prox);
@@ -2700,6 +2712,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         : 'Nenhuma solicita\u00e7\u00e3o desta lista est\u00e1 com voc\u00ea agora.'));
     }
     uiI.board.style.setProperty('--lcbk-cols', String(uiI.board.children.length || 1));
+    uiI.board.classList.add('lcbk-largo');
     uiI.btnComigo.classList.toggle('is-on', stInst.comigo);
     uiI.btnComigo.setAttribute('aria-pressed', stInst.comigo ? 'true' : 'false');
     uiI.btnComigo.textContent = stInst.comigo && !MEU.nums ? 'Comigo\u2026' : 'Comigo';
@@ -2747,7 +2760,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       box.appendChild(b);
     });
     uiI.resumo.replaceChildren(box);
-    uiI.resumo.style.display = stInst.view === 'kanban' && lista.length && !(EH_GESTOR && stInst.painel) ? '' : 'none';
+    var verResumo = ls('lcbKanbanResumo') !== 'off';
+    uiI.resumo.style.display = verResumo && stInst.view === 'kanban' && lista.length && !(EH_GESTOR && stInst.painel) ? '' : 'none';
+    if (uiI.btnResumo) {
+      uiI.btnResumo.style.display = stInst.view === 'kanban' && lista.length && !(EH_GESTOR && stInst.painel) ? '' : 'none';
+      uiI.btnResumo.textContent = verResumo ? 'Ocultar pessoas' : 'Mostrar pessoas';
+      uiI.btnResumo.setAttribute('aria-pressed', verResumo ? 'true' : 'false');
+    }
     renderPainel(lidos, completo, totalZeev());
     if (uiI.btnPainel) {
       uiI.btnPainel.style.display = EH_GESTOR && stInst.view === 'kanban' ? '' : 'none';
@@ -2868,6 +2887,14 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       renderInst();
     });
     uiI.tools.appendChild(uiI.btnComigo);
+    uiI.btnResumo = el('button', 'lcbk-btn', 'Ocultar pessoas');
+    uiI.btnResumo.type = 'button';
+    uiI.btnResumo.title = 'Mostrar ou ocultar a faixa com o resumo por pessoa';
+    uiI.btnResumo.addEventListener('click', function () {
+      ls('lcbKanbanResumo', ls('lcbKanbanResumo') === 'off' ? 'on' : 'off');
+      renderInst();
+    });
+    uiI.tools.appendChild(uiI.btnResumo);
     var lbl = el('label', 'lcbk-check');
     uiI.outras = el('input');
     uiI.outras.type = 'checkbox';
@@ -2969,6 +2996,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     try {
       var x = new URL(u, location.origin);
       if (x.origin !== location.origin || !PADRAO_TAREFAS.test(x.pathname + x.search)) return;
+      if (ehNossa(x.href)) return;                              // consultas do pr\u00f3prio Kanban
       var b = baseTarefas(x.href);
       if (LT.carregando && b === LT.base) return;              // nossas pr\u00f3prias consultas
       if (LT.carregando) LT.cancelar = true;
@@ -3043,7 +3071,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       render();
       u.searchParams.set('pageNumber', String(p));
       u.searchParams.set('recordsPerPage', String(rpp));
-      getJson(u.href).then(function (j) {
+      getJson(nossa(u.href)).then(function (j) {
         var sx = j && j.success, lote = (sx && sx.itens) || [];
         if (p === 1 && sx && sx.hasmoreitens && lote.length && lote.length < rpp) rpp = lote.length;
         lote.forEach(function (x) {
