@@ -860,13 +860,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
 
     var perdidaCol = /^perd/.test(colId || '');
     var rotProp = colId === 'fechados' ? 'Valor pago' : aceita ? 'Proposta aceita' : perdidaCol ? '\u00daltima proposta' : 'Proposta vigente';
-    if (info.face) linhas.push(['Valor de face', info.face, '', 'is-face']);
+    if (info.face) linhas.push([info.faceRot ? 'Valor de face (honor\u00e1rios)' : 'Valor de face', info.face, '', 'is-face']);
     if (info.proposta) linhas.push([rotProp, info.proposta, '', 'is-valor']);
     else if (info.semProposta) linhas.push([rotProp, 'sem proposta', '', 'is-vazio']);
     var elMot = null;
     if (perdidaCol) {
       var mot = colId === 'perdJur' ? (info.motJur || info.motCli) : (info.motCli || info.motJur);
-      mot = (mot || '').replace(/[\s,;:\u2013-]+$/, '');
+      mot = (mot || '').replace(/^\s*motivo\s*:\s*/i, '').replace(/[\s,;:\u2013-]+$/, '');
       elMot = el('div', 'lcbk-motivo', mot ? 'Motivo: ' + mot : 'Motivo n\u00e3o informado no formul\u00e1rio');
       if (mot) elMot.title = mot;
     }
@@ -2134,6 +2134,20 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var h = linhas[0].map(clean), F = CFG.producao.form;
     var ix = function (nome) { return h.indexOf(nome); };
     var iSol = ix('N\u00famero da solicita\u00e7\u00e3o');
+    var candProp = [];
+    // "Valor de Face" de partes que n\u00e3o s\u00e3o o autor nem o advogado contratual (vF..., ex.: sucumbencial)
+    var candFace = [];
+    h.forEach(function (n, i) {
+      if ((/^vF[A-Z]/.test(n) && ['vFA', 'vFHC'].indexOf(n) === -1) || (/sucumb/i.test(n) && /face/i.test(n))) candFace.push(i);
+    });
+    h.forEach(function (n, i) {
+      if (!/propost/i.test(n) && !/^vP[A-Z]|^vSP|^vPDF/.test(n)) return;
+      if (/^p[A-Z]|^d[A-Z]|^jR/.test(n)) return;                    // % , des\u00e1gio e juros (pPP, dPP, jRPP)
+      if (/numero|n[u\u00fa]mero|parecer|justific|des[a\u00e1]gio|anexo|img|pdf$|txt|canva|evidenc|print|descri|motivo|observ|status|data|prazo|fundo/i.test(n)) return;
+      var rank = /corrig/i.test(n) ? 0 : /novo|nova/i.test(n) ? 1 : /pdf|diretor|\bdf/i.test(n) ? 2 : /segund|^vSP/i.test(n) ? 3 : 4;
+      var rot = ['corrigida', 'nova proposta', 'diretor financeiro', '2\u00aa proposta', 'proposta'][rank];
+      candProp.push({ i: i, rank: rank, rot: rot });
+    });
     var pega = function (r, nomes) {
       for (var i = 0; i < nomes.length; i++) { var k = ix(nomes[i]); if (k >= 0 && clean(r[k])) return clean(r[k]); }
       return '';
@@ -2145,6 +2159,26 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       for (var i = 0; i < F.propostas.length; i++) {
         var k = ix(F.propostas[i][0]);
         if (k >= 0 && parseValor(r[k])) { o.prop = parseValor(r[k]); o.propRot = F.propostas[i][1]; break; }
+      }
+      // Fluxos/partes com outros nomes de campo (ex.: Advogado Sucumbencial): procura qualquer
+      // coluna de VALOR de proposta e fica com a mais recente (corrigida > nova > diretor financeiro > 2\u00aa > demais).
+      if (!o.prop) {
+        var melhor = null;
+        candProp.forEach(function (cp) {
+          var bruto = clean(r[cp.i]);
+          if (!bruto || !/^[R$\s\d.,-]+$/.test(bruto)) return;
+          var v = parseValor(bruto);
+          if (!v) return;
+          if (!melhor || cp.rank < melhor.rank || (cp.rank === melhor.rank && cp.i > melhor.i)) melhor = { v: v, rank: cp.rank, i: cp.i, rot: cp.rot };
+        });
+        if (melhor) {
+          o.prop = melhor.v; o.propRot = melhor.rot;
+          // Advogado Sucumbencial (e outras partes): o valor de face \u00e9 o dos HONOR\u00c1RIOS dessa parte
+          // ("Valor de Face" da se\u00e7\u00e3o dela), n\u00e3o o Valor Total do Cr\u00e9dito Principal.
+          var faceParte = 0;
+          candFace.forEach(function (cf) { if (!faceParte) faceParte = parseValor(r[cf]); });
+          if (faceParte) { o.face = faceParte; o.faceRot = 'honor\u00e1rios'; }
+        }
       }
       o.tipo = semDoc(pega(r, F.tipo));
       o.nProp = semDoc(pega(r, F.numeroProposta));
@@ -2181,7 +2215,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var f = FORM.porSol[it.num];
     if (!f) return;
     var inf = it.info || (it.info = {});
-    if (f.face) { inf.faceN = f.face; inf.face = moedaBR(f.face); }
+    if (f.face) { inf.faceN = f.face; inf.face = moedaBR(f.face); inf.faceRot = f.faceRot || ''; }
     if (f.prop) { inf.propN = f.prop; inf.proposta = moedaBR(f.prop); inf.propostaRot = f.propRot; }
     else if (f.face) { inf.semProposta = true; }
     if (f.face && f.prop) inf.desagio = Math.max(0, 1 - f.prop / f.face);
