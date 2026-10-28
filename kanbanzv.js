@@ -69,7 +69,8 @@
       // s\u00f3 estes s\u00e3o lidos; CPF, endere\u00e7o, telefone e o resto s\u00e3o descartados na leitura.
       // Propostas: da mais recente para a mais antiga (a 1\u00aa preenchida \u00e9 a vigente).
       form: {
-        face: ['vTA', 'vTHC'],
+        // Valor de face = "Valor Total do Cr\u00e9dito Principal" (vTCP). vTA/vTHC s\u00f3 se o vTCP estiver vazio.
+        face: ['vTCP', 'vTA', 'vTHC'],
         propostas: [['vPAutorCorrigida', 'corrigida'], ['vPAdvCCorrigida', 'corrigida'], ['vPAdvogadoContratualCorrigida', 'corrigida'],
                     ['vPDFParaAutor', 'diretor financeiro'], ['vPDFParaAdvogado', 'diretor financeiro'], ['vPDFParaAdvogadoContratual', 'diretor financeiro'],
                     ['vSPAutor', '2\u00aa proposta'], ['vSPAdvogadoContratual', '2\u00aa proposta'],
@@ -858,8 +859,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var aceita = ['fecCom', 'cessao', 'fechados'].indexOf(colId) !== -1;
 
     var perdidaCol = /^perd/.test(colId || '');
-    var rotProp = aceita ? 'Proposta aceita' : perdidaCol ? '\u00daltima proposta' : 'Proposta vigente';
-    if (info.face) linhas.push(['Valor de face (vTA)', info.face, '', 'is-face']);
+    var rotProp = colId === 'fechados' ? 'Valor pago' : aceita ? 'Proposta aceita' : perdidaCol ? '\u00daltima proposta' : 'Proposta vigente';
+    if (info.face) linhas.push(['Valor de face', info.face, '', 'is-face']);
     if (info.proposta) linhas.push([rotProp, info.proposta, '', 'is-valor']);
     else if (info.semProposta) linhas.push([rotProp, 'sem proposta', '', 'is-vazio']);
     var elMot = null;
@@ -1679,7 +1680,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
           .map(function (c) { c.precisaB = false; return c; })
           .concat([{ id: 'fecCom', name: 'Fechado comercialmente', ok: true, dica: 'proposta aceita, em formaliza\u00e7\u00e3o (fora as pend\u00eancias)' },
                    { id: 'cessao', name: 'Fundo & Cess\u00e3o', dica: 'T23 e T24 em andamento' },
-                   { id: 'fechados', name: 'Fechados (cess\u00e3o)', ok: true, dica: 'passou da T24 ou conclu\u00edda', encerrada: true },
+                   { id: 'fechados', name: 'Fechados (PAGO)', ok: true, dica: 'passou da T24 ou conclu\u00edda', encerrada: true },
                    { id: 'perdJur', name: 'Perdidas \u00b7 rejeitada pelo jur\u00eddico', alert: true, dica: 'passou pela reprova\u00e7\u00e3o (T11, T15 ou T16)', encerrada: true },
                    { id: 'perdCli', name: 'Perdidas \u00b7 rejeitada pelo cliente', alert: true, dica: 'cancelada ou recusada pelo cliente', encerrada: true },
                    { id: 'perdNI', name: 'Perdidas \u00b7 motivo n\u00e3o identificado', alert: true, opcional: true, encerrada: true,
@@ -2677,8 +2678,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         h.appendChild(sm2);
       } else if (c.dica != null) {
         if (c.dica) h.appendChild(el('small', null, c.dica));
-        if (somaFace) h.appendChild(el('small', 'lcbk-soma', moedaBR(somaFace) + ' em vTA'));
-        if (somaProp && ['fecCom', 'cessao', 'fechados'].indexOf(c.id) !== -1) h.appendChild(el('small', 'lcbk-soma is-prop', moedaBR(somaProp) + ' em propostas aceitas'));
+        if (somaFace) h.appendChild(el('small', 'lcbk-soma', moedaBR(somaFace) + ' em valor de face'));
+        if (somaProp && ['fecCom', 'cessao', 'fechados'].indexOf(c.id) !== -1) {
+          h.appendChild(el('small', 'lcbk-soma is-prop', moedaBR(somaProp) + (c.id === 'fechados' ? ' pagos' : ' em propostas aceitas')));
+        }
       }
       head.appendChild(h);
       head.appendChild(el('span', 'lcbk-count', fmtN(n)));
