@@ -61,7 +61,10 @@
       triagem: 'T01',             // Pai: T01-Analisar Viabilidade finalizada = 1 triagem (data de finaliza\u00e7\u00e3o)
       aceite: 'T07',              // Filho: entrou na T07 = proposta aceita (data de recebimento da 1\u00aa T07)
       formal: 'T24',              // Filho: T24 finalizada = cess\u00e3o protocolada (data de finaliza\u00e7\u00e3o)
-      sdr: ['Raphisa']            // se a SDR for a solicitante do Filho, o dono \u00e9 quem fez a T01-Negociar Compra
+      sdr: ['Raphisa'],
+      // Perdida "pelo jur\u00eddico" = a negocia\u00e7\u00e3o passou por uma destas tarefas (reprova\u00e7\u00e3o):
+      // T11 Analisar Reprova\u00e7\u00e3o, T15 Analisar Recusa da Reprova\u00e7\u00e3o, T16 Conselho. Sen\u00e3o, "pelo cliente".
+      perdaJuridico: ['T11', 'T15', 'T16']            // se a SDR for a solicitante do Filho, o dono \u00e9 quem fez a T01-Negociar Compra
     },
 
     // Vis\u00e3o do gestor: s\u00f3 nesta p\u00e1gina (Monitorar > Solicita\u00e7\u00f5es). Quem controla o acesso \u00e9 a
@@ -351,9 +354,9 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-10-26b';
+  var VERSAO = '2026-10-26';
   if (ls('lcbKanbanVersao') !== VERSAO) {
-    if (['2026-10-21', '2026-10-26'].indexOf(ls('lcbKanbanVersao')) === -1) { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
+    if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
   }
 
@@ -368,39 +371,6 @@
 function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function clean(s) { return (s == null ? '' : String(s)).replace(/\s+/g, ' ').trim(); }
   function lower(s) { return clean(s).toLowerCase(); }
-  // \u2500\u2500 Busca: sem acento, sem mai\u00fascula, palavra por palavra, n\u00fameros em qualquer formato.
-  //    S\u00f3 em mem\u00f3ria (nada vai para o navegador) e s\u00f3 sobre o que o Zeev j\u00e1 deixou a pessoa ver.
-  function fold(s) {
-    var t = clean(s).toLowerCase();
-    return t.normalize ? t.normalize('NFD').replace(/[\u0300-\u036f]/g, '') : t;
-  }
-  function prepBusca(q) {
-    var f = fold(q);
-    if (!f) return null;
-    var dig = f.replace(/\D/g, '');
-    return {
-      q: q,
-      dig: dig.length >= 3 && !/[a-z]/.test(f) ? dig : '',    // s\u00f3 n\u00fameros: n\u00ba, CPF ou processo, com ou sem pontua\u00e7\u00e3o
-      tokens: f.replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean)
-    };
-  }
-  function indiceBusca(it) {
-    if (it._ix) return it._ix;
-    var inf = it.info || {};
-    var txt = [it.numero, it.titulo, inf.nome, it.processo, it.atividade, it.quem, it.donoNome, inf.procNum, inf.cpf, it.status].join(' ');
-    var dig = [it.num || digits(it.numero), inf.cpf, inf.procNum].map(function (v) { return String(v || '').replace(/\D/g, ''); })
-      .filter(Boolean).join(' ');
-    return (it._ix = { txt: ' ' + fold(txt).replace(/[^a-z0-9]+/g, ' ') + ' ', dig: ' ' + dig + ' ' });
-  }
-  // Cada palavra digitada tem de ser o COME\u00c7O de alguma palavra do card (ordem livre):
-  // "rosimere", "rosi silva", "silva rosimere" e "ros" acham "Rosim\u00e9re Zanetti da Silva".
-  function bateBusca(it, P) {
-    if (!P) return true;
-    var ix = indiceBusca(it);
-    if (P.dig) return ix.dig.indexOf(P.dig) !== -1;
-    for (var i = 0; i < P.tokens.length; i++) if (ix.txt.indexOf(' ' + P.tokens[i]) === -1) return false;
-    return P.tokens.length > 0;
-  }
   function txt(el) { return el ? clean(el.textContent) : ''; }
   function digits(s) { var m = clean(s).match(/\d+/); return m ? m[0] : ''; }
   function $$(q, ctx) { return Array.prototype.slice.call((ctx || document).querySelectorAll(q)); }
@@ -824,6 +794,15 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     }
   }
 
+  function valorNum(v) {
+    var m = String(v || '').replace(/[^\d,.-]/g, '');
+    if (!m) return 0;
+    return parseFloat(m.replace(/\./g, '').replace(',', '.')) || 0;
+  }
+  function moedaCurta(n) {
+    return n >= 1e6 ? 'R$ ' + (n / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' mi'
+      : n >= 1e3 ? 'R$ ' + Math.round(n / 1e3).toLocaleString('pt-BR') + ' mil' : 'R$ ' + Math.round(n).toLocaleString('pt-BR');
+  }
   function mascararCpf(cpf) { return '***.' + cpf.slice(4, 11) + '-**'; }
   function blocoInfo(c, info, comNome) {
     if (!info) return;
@@ -967,7 +946,12 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   };
   var ui = {};
 
-  function combina(it, P) { return !P || bateBusca(it, P); }
+  function combina(it, q) {
+    if (!q) return true;
+    var inf = it.info || {};
+    var cpf = inf.cpf ? inf.cpf + ' ' + inf.cpf.replace(/\D/g, '') : '';
+    return [it.numero, it.titulo, it.processo, it.atividade, it.quem, it.donoNome, inf.nome, inf.procNum, cpf].join(' ').toLowerCase().indexOf(q) !== -1;
+  }
 
   function resumoEquipe(itens) {
     var por = {};
@@ -1048,12 +1032,12 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var cols = L.cols();
     var buckets = {};
     cols.forEach(function (c) { buckets[c.id] = []; });
-    var q = state.busca.toLowerCase(), PB = prepBusca(state.busca);
+    var q = state.busca.toLowerCase();
     var ocultos = 0;
     porFase.forEach(function (it) {
       var col = L.place(it);
       if (!col || !buckets[col]) return;
-      if (!combina(it, PB) || (equipe && state.dono && it.dono !== state.dono)) { ocultos++; return; }
+      if (!combina(it, q) || (equipe && state.dono && it.dono !== state.dono)) { ocultos++; return; }
       buckets[col].push(it);
     });
 
@@ -1344,29 +1328,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-gaveta-frame{flex:1;width:100%;border:0;background:#fff;border-radius:0 0 12px 12px}',
       '.lcbk-busca-vazia{grid-column:1 / -1;font-size:13px;color:#404857;background:#fff;border:1px dashed #c9cfda;border-radius:10px;padding:18px;margin:0}',
       '.lcbk-comigo.is-on{background:#1b2f5c;color:#fff;border-color:#1b2f5c}',
-      '.lcbk-busca{grid-column:1 / -1;display:flex;flex-direction:column;gap:10px;min-width:0}',
-      '.lcbk-busca-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;font-size:13px;color:#172b4d}',
-      '.lcbk-busca-head small{flex-basis:100%;color:#5e6c84}',
-      '.lcbk-pes{background:#fff;border:1px solid #e1e4ea;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}',
-      '.lcbk-pes.is-rep{border-left:4px solid #d97706}',
-      '.lcbk-pes-top{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px}',
-      '.lcbk-pes-top .lcbk-proc{margin:0}',
-      '.lcbk-pes-nome{font-size:14px;color:#172b4d;text-transform:uppercase}',
-      '.lcbk-pes-obs{font-size:12px;color:#8993a4}',
-      '.lcbk-pes-rows{display:flex;flex-direction:column;gap:4px}',
-      '.lcbk-bsol{display:flex;align-items:center;gap:10px;width:100%;text-align:left;font:inherit;font-size:12px;color:#404857;background:#f7f8fa;border:1px solid transparent;border-radius:8px;padding:7px 10px;cursor:pointer}',
-      '.lcbk-bsol:hover{border-color:#c9cfda;background:#fff}',
-      '.lcbk-bsol:focus-visible{outline:2px solid #3b6fd8;outline-offset:2px}',
-      '.lcbk-bsol.is-done{opacity:.75}',
-      '.lcbk-bsol-txt{flex:1;min-width:0;display:flex;flex-direction:column}',
-      '.lcbk-bsol-txt strong{color:#172b4d;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-      '.lcbk-bsol-txt span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-      '.lcbk-bst{font-size:11px;font-weight:600;border-radius:999px;padding:2px 8px;background:#f1f2f5;color:#404857;white-space:nowrap}',
-      '.lcbk-bst.is-on{background:#e8f0fe;color:#1b4fb3}',
-      '.lcbk-bst.is-late{background:#fdecea;color:#b42318}',
-      '.lcbk-bst.is-warn{background:#fff4e5;color:#9a4b00}',
-      '.lcbk-bst.is-done{background:#eef0f3;color:#5e6c84}',
-      '@media (max-width:768px){.lcbk-bsol{flex-wrap:wrap}.lcbk-bsol-txt strong,.lcbk-bsol-txt span{white-space:normal}}',
+      '.lcbk-soma{color:#2e7d4f!important;font-weight:600}',
       '.lcbk-mais{width:100%;margin-top:4px;background:#fff}',
       '.lcbk-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#404857;cursor:pointer}',
       '.lcbk-chip.is-area{background:#f1f2f5;color:#404857}',
@@ -1662,14 +1624,48 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     });
   }
 
+  // Esteira comercial (Acompanhar/Monitorar): fecha como a Torre de Controle.
+  //  Fundo & Cess\u00e3o = negocia\u00e7\u00e3o na T23/T24; Fechados (cess\u00e3o) = passou da T24 (T25, T27,
+  //  acompanhamento do ativo) ou foi conclu\u00edda sem perda; Perdidas = encerrada como
+  //  cancelada/recusada/reprovada/rejeitada.
+  var RE_PERDA = /cancel|recus|reprov|rejeit|perd|desist|desqualif/i;
+  function perdida(it) { return RE_PERDA.test((it.status || '') + ' ' + (it.resultado || '')); }
   function layoutEsteiraInst(id) {
+    if (id === 'comercial') return {
+      nome: CFG.esteiras[id].nome,
+      esteira: id,
+      cols: function () {
+        return colunasEsteira(id).map(function (c) { c.precisaB = false; return c; })
+          .concat([{ id: 'cessao', name: 'Fundo & Cess\u00e3o', dica: 'T23 e T24 em andamento' },
+                   { id: 'fechados', name: 'Fechados (cess\u00e3o)', ok: true, dica: 'passou da T24 ou conclu\u00edda', encerrada: true },
+                   { id: 'perdJur', name: 'Perdidas \u00b7 rejeitada pelo jur\u00eddico', alert: true, dica: 'passou pela reprova\u00e7\u00e3o (T11, T15 ou T16)', encerrada: true },
+                   { id: 'perdCli', name: 'Perdidas \u00b7 rejeitada pelo cliente', alert: true, dica: 'cancelada ou recusada pelo cliente', encerrada: true },
+                   { id: 'perdNI', name: 'Perdidas \u00b7 motivo n\u00e3o identificado', alert: true, opcional: true, encerrada: true,
+                     dica: PERDA.carregando ? 'lendo o hist\u00f3rico das negocia\u00e7\u00f5es\u2026' : 'hist\u00f3rico n\u00e3o dispon\u00edvel' },
+                   { id: 'outros', name: 'Outras \u00e1reas', opcional: true, outras: true }]);
+      },
+      place: function (it) {
+        if (it.tipo !== 'filho') return it.ativo ? colunaDe(id, it) : 'outros';
+        if (!it.ativo) {
+          if (!perdida(it)) return 'fechados';
+          if (!PERDA.porSol && !PERDA.carregando && !PERDA.erro) setTimeout(carregarMotivosPerda, 0);
+          var mot = PERDA.porSol && PERDA.porSol[it.num];
+          var idade = PERDA.em ? Date.now() - PERDA.em.getTime() : 0;
+          if (!PERDA.carregando && PERDA.em && (idade > 30 * 60000 || (!mot && idade > 5 * 60000))) setTimeout(carregarMotivosPerda, 0);
+          return mot === 'juridico' ? 'perdJur' : mot === 'cliente' ? 'perdCli' : 'perdNI';
+        }
+        if (it.stage === 'pos') return 'fechados';
+        if (it.stage === 'cessao') return 'cessao';
+        return colunaDe(id, it);
+      }
+    };
     return {
       nome: CFG.esteiras[id].nome,
       esteira: id,
       cols: function () {
         return colunasEsteira(id).map(function (c) { c.precisaB = false; return c; })
           .concat([{ id: 'outros', name: 'Outras \u00e1reas', opcional: true, outras: true },
-                   { id: 'encerradas', name: 'Encerradas', ok: true }]);
+                   { id: 'encerradas', name: 'Encerradas', ok: true, encerrada: true }]);
       },
       place: function (it) {
         // encerradas do Pai n\u00e3o interessam \u00e0s esteiras comercial e jur\u00eddica
@@ -1810,7 +1806,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       quem: ativo ? semDoc(respTxt.replace(/,\s*\+\d+\s*$/, '')) : '',
       fila: fila, mais: mais, prazoTxt: ativo ? prazoTxt : '', due: due, late: late, info: infoApi,
       today: !late && !!(due && due.date && due.date.toDateString() === now.toDateString()),
-      ativo: ativo, status: status, fimEm: toDate(textoDeHtml(x.enddate)), inicioEm: toDate(textoDeHtml(x.startdate)),
+      ativo: ativo, status: status, resultado: textoDeHtml(x.flowresult),
+      fimEm: toDate(textoDeHtml(x.enddate)), inicioEm: toDate(textoDeHtml(x.startdate)),
       tipo: tipo, stage: cl.etapa, area: cl.area
     };
   }
@@ -1933,7 +1930,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     });
     var top = el('div', 'lcbk-top');
     top.appendChild(el('span', 'lcbk-num', it.numero));
-    var flag = !it.ativo ? [it.status || 'Encerrada', /rejeit|cancel|reprov|perd/i.test(it.status) ? 'is-lost' : 'is-done'] :
+    var flag = !it.ativo ? [(it.resultado && it.resultado !== it.status ? it.resultado : it.status) || 'Encerrada', perdida(it) ? 'is-lost' : 'is-done'] :
       it.late ? ['Atrasada', ''] : it.today ? ['Vence hoje', 'is-today'] :
       it.fila ? ['Na fila', 'is-stuck'] : null;
     if (flag) top.appendChild(el('span', 'lcbk-flag ' + flag[1], flag[0]));
@@ -1978,9 +1975,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     painel: ls('lcbKanbanPainel') !== '0',
     time: ['triagem', 'comercial', 'juridico'].indexOf(ls('lcbKanbanTime')) !== -1 ? ls('lcbKanbanTime') : '',
     totalConfirmado: '',
-    busca: '',
-    soRepetidos: false,
-    limBusca: 60
+    busca: ''
   };
   var uiI = {};
 
@@ -2025,11 +2020,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     return t;
   }
   // baixa o log de um recorte; devolve s\u00f3 os campos necess\u00e1rios
-  function baixarLog(fluxo, flowStatus, ini, fim, extra) {
+  function baixarLog(fluxo, flowStatus, ini, fim, extra, est) {
     var q = 'reportType=ihavepermission&taskStatus=S&flowStatus=' + flowStatus +
       '&codFlowsOrServices=' + encodeURIComponent(fluxo[0] + ';' + fluxo[1] + ';0;0') +
       '&startBegin=' + encodeURIComponent(ddmmaaaa(ini)) + '&startEnd=' + encodeURIComponent(ddmmaaaa(fim)) + (extra || '');
-    PROD.consultas++;
+    (est || PROD).consultas++;
     return getJson('/api/internal/bpms/1.0/instances/export/tasks/csvsemicolon?' + q).then(function (j) {
       var linhas = lerCsv(decodificar(j && j.success && j.success.fileContent));
       if (!linhas.length) return { n: 0, itens: [] };
@@ -2048,19 +2043,48 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     });
   }
   // divide o per\u00edodo da solicita\u00e7\u00e3o at\u00e9 cada parte vir abaixo do corte de 1.000 linhas
-  function baixarRecorte(fluxo, flowStatus, ini, fim, extra, acc) {
-    return baixarLog(fluxo, flowStatus, ini, fim, extra).then(function (res) {
+  function baixarRecorte(fluxo, flowStatus, ini, fim, extra, acc, est) {
+    return baixarLog(fluxo, flowStatus, ini, fim, extra, est).then(function (res) {
       if (res.n >= CFG.producao.limiteLinhas) {
         var dias = Math.round((fim - ini) / DIA);
-        if (dias < 1) { PROD.incompleto++; res.itens.forEach(function (x) { acc.push(x); }); return; }
+        if (dias < 1) { (est || PROD).incompleto++; res.itens.forEach(function (x) { acc.push(x); }); return; }
         var meio = new Date(ini.getTime() + Math.floor(dias / 2) * DIA);
         var depois = new Date(meio.getTime() + DIA);
-        return baixarRecorte(fluxo, flowStatus, ini, meio, extra, acc)
-          .then(function () { return baixarRecorte(fluxo, flowStatus, depois, fim, extra, acc); });
+        return baixarRecorte(fluxo, flowStatus, ini, meio, extra, acc, est)
+          .then(function () { return baixarRecorte(fluxo, flowStatus, depois, fim, extra, acc, est); });
       }
       res.itens.forEach(function (x) { acc.push(x); });
     });
   }
+  var PERDA = { porSol: null, carregando: false, erro: '', em: null, consultas: 0, incompleto: 0 };
+  function carregarMotivosPerda() {
+    if (PERDA.carregando) return;
+    PERDA.carregando = true; PERDA.erro = ''; PERDA.consultas = 0; PERDA.incompleto = 0;
+    var hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    var base = lerData(CFG.producao.inicioBase) || new Date(2020, 0, 1);
+    var acc = [];
+    var filhos = CFG.producao.fluxos.filter(function (f) { return f[2] === 'filho'; });
+    var i = 0;
+    function prox() {
+      if (i >= filhos.length) return Promise.resolve();
+      return baixarRecorte(filhos[i++], 'N', base, hoje, '', acc, PERDA).then(prox);
+    }
+    prox().then(function () {
+      var cods = {};
+      acc.forEach(function (x) { if (x.sol) (cods[x.sol] = cods[x.sol] || {})[x.cod] = 1; });
+      var por = {};
+      Object.keys(cods).forEach(function (sol) {
+        por[sol] = CFG.producao.perdaJuridico.some(function (c) { return cods[sol][c]; }) ? 'juridico' : 'cliente';
+      });
+      PERDA.porSol = por; PERDA.em = new Date();
+    }).catch(function (e) {
+      PERDA.erro = (e && e.message) || 'erro';
+    }).then(function () {
+      PERDA.carregando = false; acc = null;
+      if (uiI.board) renderInst();
+    });
+  }
+
   function carregarProducao() {
     if (PROD.carregando) return;
     PROD.carregando = true; PROD.erro = ''; PROD.consultas = 0; PROD.incompleto = 0;
@@ -2420,108 +2444,6 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     p.replaceChildren(frag);
   }
 
-  // \u2550\u2550\u2550 BUSCA POR PESSOA \u2550\u2550\u2550
-  // Agrupa as solicita\u00e7\u00f5es encontradas por PESSOA: pelo CPF do cliente quando o resumo tem;
-  // sen\u00e3o, pelo nome (sem acento). Mostra repetidos e hom\u00f4nimos.
-  function nomePessoa(it) { var inf = it.info || {}; return inf.nome || (it.processo ? it.titulo : ''); }
-  function agruparPessoas(lista) {
-    var grupos = {}, porNome = {};
-    lista.forEach(function (it) {
-      var inf = it.info || {}, cpf = String(inf.cpf || '').replace(/\D/g, ''), nome = nomePessoa(it), fn = fold(nome);
-      var k = cpf.length === 11 ? 'c:' + cpf : fn ? 'n:' + fn : 'x:' + it.num;
-      var g = grupos[k] || (grupos[k] = { k: k, nome: nome, cpf: cpf.length === 11 ? inf.cpf : '', fn: fn, itens: [], ativos: 0 });
-      if (!g.nome && nome) { g.nome = nome; g.fn = fn; }
-      g.itens.push(it);
-      if (it.ativo) g.ativos++;
-    });
-    var arr = Object.keys(grupos).map(function (k) { return grupos[k]; });
-    arr.forEach(function (g) { if (g.fn) (porNome[g.fn] = porNome[g.fn] || []).push(g); });
-    arr.forEach(function (g) {
-      var mesmos = g.fn ? porNome[g.fn] : [];
-      g.repetido = g.itens.length > 1;
-      g.homonimo = mesmos.filter(function (o) { return o !== g && o.cpf && g.cpf; }).length;         // mesmo nome, outro CPF
-      g.semCpfIgual = mesmos.filter(function (o) { return o !== g && (!o.cpf || !g.cpf); }).length;   // talvez a mesma pessoa
-      g.itens.sort(function (a, b) { return (b.ativo - a.ativo) || ((+b.num || 0) - (+a.num || 0)); });
-    });
-    arr.sort(function (a, b) {
-      return ((b.repetido || b.semCpfIgual ? 1 : 0) - (a.repetido || a.semCpfIgual ? 1 : 0)) ||
-             (a.fn || '~').localeCompare(b.fn || '~') || b.itens.length - a.itens.length;
-    });
-    return arr;
-  }
-  function linhaSolicitacao(it) {
-    var b = el('button', 'lcbk-bsol' + (it.ativo ? (it.late ? ' is-late' : '') : ' is-done'));
-    b.type = 'button';
-    b.setAttribute('aria-label', 'Abrir ' + it.numero + ' ' + (it.processo || it.titulo));
-    b.addEventListener('click', function (e) {
-      abrirComTecla(e, it.href, it.numero + ' \u00b7 ' + it.titulo, function () { abrirInstancia(it); });
-    });
-    b.appendChild(el('span', 'lcbk-num', it.numero));
-    var meio = el('span', 'lcbk-bsol-txt');
-    meio.appendChild(el('strong', null, it.processo || it.titulo));
-    var det = it.ativo
-      ? [it.atividade, it.fila ? 'na fila, ningu\u00e9m assumiu' : (it.quem ? 'com ' + it.quem : ''), it.prazoTxt ? 'prazo ' + it.prazoTxt : '']
-      : [(it.status || 'Encerrada') + (it.fimEm ? ' em ' + fmtData(it.fimEm) : '')];
-    if ((it.info || {}).procNum) det.push('processo ' + it.info.procNum);
-    meio.appendChild(el('span', null, det.filter(Boolean).join(' \u00b7 ')));
-    b.appendChild(meio);
-    var st = !it.ativo ? [/rejeit|cancel|reprov|perd/i.test(it.status) ? 'Rejeitada/encerrada' : 'Encerrada', 'is-done']
-      : it.late ? ['Atrasada', 'is-late'] : ['Em andamento', 'is-on'];
-    b.appendChild(el('span', 'lcbk-bst ' + st[1], st[0]));
-    return b;
-  }
-  function viewBusca(achados, base, completo) {
-    var wrap = el('section', 'lcbk-busca');
-    wrap.setAttribute('aria-label', 'Resultado da busca');
-    var grupos = agruparPessoas(achados);
-    var nRep = grupos.filter(function (g) { return g.repetido || g.semCpfIgual; }).length;
-    var head = el('div', 'lcbk-busca-head');
-    head.appendChild(el('strong', null, fmtN(grupos.length) + (grupos.length === 1 ? ' pessoa' : ' pessoas') + ' \u00b7 ' +
-      fmtN(achados.length) + (achados.length === 1 ? ' solicita\u00e7\u00e3o' : ' solicita\u00e7\u00f5es')));
-    if (nRep) head.appendChild(el('span', 'lcbk-bst is-late', fmtN(nRep) + ' com mais de uma solicita\u00e7\u00e3o ou poss\u00edvel duplicidade'));
-    var lbl = el('label', 'lcbk-check');
-    var ck = el('input'); ck.type = 'checkbox'; ck.checked = stInst.soRepetidos;
-    ck.addEventListener('change', function () { stInst.soRepetidos = ck.checked; renderInst(); });
-    lbl.appendChild(ck); lbl.appendChild(document.createTextNode(' S\u00f3 repetidos'));
-    head.appendChild(lbl);
-    var cobertura = completo ? 'Busca em todas as ' + fmtN(base) + ' solicita\u00e7\u00f5es desta lista (todos os status e etapas).'
-      : 'Busca nas ' + fmtN(base) + ' solicita\u00e7\u00f5es j\u00e1 carregadas' + (LC.carregando ? ' \u2014 a carga continua e o resultado se atualiza sozinho.' : '. Use "Carregar todas" para buscar na lista inteira.');
-    if (LB.carregando && LB.q === stInst.busca) cobertura += ' Procurando tamb\u00e9m pela Palavra-chave do Zeev\u2026';
-    head.appendChild(el('small', null, cobertura));
-    wrap.appendChild(head);
-    var lista = stInst.soRepetidos ? grupos.filter(function (g) { return g.repetido || g.semCpfIgual; }) : grupos;
-    if (!lista.length) {
-      wrap.appendChild(el('p', 'lcbk-busca-vazia', LB.carregando && LB.q === stInst.busca
-        ? 'Procurando "' + stInst.busca + '"\u2026'
-        : stInst.soRepetidos && grupos.length ? 'Nenhuma pessoa repetida neste resultado.'
-        : 'Nada encontrado para "' + stInst.busca + '". Tente s\u00f3 o primeiro nome, s\u00f3 os n\u00fameros do CPF ou o n\u00ba da solicita\u00e7\u00e3o.'));
-      return wrap;
-    }
-    lista.slice(0, stInst.limBusca).forEach(function (g) {
-      var c = el('article', 'lcbk-pes' + (g.repetido || g.semCpfIgual ? ' is-rep' : ''));
-      var top = el('div', 'lcbk-pes-top');
-      top.appendChild(el('strong', 'lcbk-pes-nome', g.nome || 'Sem nome no resumo'));
-      if (g.cpf) blocoInfo(top, { cpf: g.cpf }, false);
-      else top.appendChild(el('span', 'lcbk-pes-obs', 'CPF n\u00e3o informado no resumo'));
-      var tags = el('div', 'lcbk-tags');
-      tags.appendChild(el('span', 'lcbk-chip', g.itens.length + (g.itens.length === 1 ? ' solicita\u00e7\u00e3o' : ' solicita\u00e7\u00f5es') +
-        (g.ativos ? ' (' + g.ativos + ' em andamento)' : '')));
-      if (g.repetido) tags.appendChild(el('span', 'lcbk-bst is-late', g.cpf ? 'Repetido: mesmo CPF' : 'Repetido: mesmo nome'));
-      if (g.semCpfIgual) tags.appendChild(el('span', 'lcbk-bst is-warn', 'Mesmo nome em outro registro sem CPF: confira'));
-      if (g.homonimo) tags.appendChild(el('span', 'lcbk-bst', 'Hom\u00f4nimo: mesmo nome com outro CPF'));
-      top.appendChild(tags);
-      c.appendChild(top);
-      var rows = el('div', 'lcbk-pes-rows');
-      g.itens.forEach(function (it) { rows.appendChild(linhaSolicitacao(it)); });
-      c.appendChild(rows);
-      wrap.appendChild(c);
-    });
-    if (lista.length > stInst.limBusca) wrap.appendChild(botaoMais(lista.length - stInst.limBusca, function () {
-      stInst.limBusca += 60; renderInst();
-    }));
-    return wrap;
-  }
-
   function renderInst() {
     if (!uiI.board) return;
     var lidos = itensDaLista();
@@ -2564,17 +2486,19 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var itens = stInst.ator && !semRecorte ? todos.filter(function (it) { return chaveAtor(it) === stInst.ator; }) : todos;
     var cols = L.cols(), buckets = {}, q = stInst.busca.toLowerCase(), ocultos = 0, achados = 0;
     cols.forEach(function (c) { buckets[c.id] = []; });
-    var PB = prepBusca(stInst.busca), achadosL = [];
     itens.forEach(function (it) {
-      if (buscando) {                       // busca: TODAS as etapas e status, inclusive fora da esteira
-        if (it._busca || bateBusca(it, PB)) achadosL.push(it); else ocultos++;
-        return;
-      }
       var col = L.place(it);
       if (!buckets[col]) return;
+      var cpfI = (it.info || {}).cpf ? it.info.cpf + ' ' + it.info.cpf.replace(/\D/g, '') : '';
+      var texto = [it.numero, it.titulo, it.processo, it.atividade, it.quem, (it.info || {}).procNum, cpfI].join(' ').toLowerCase();
+      var qd = q.replace(/\D/g, '');
+      if (q && !it._busca && texto.indexOf(q) === -1 && !(qd.length >= 4 && texto.replace(/\D/g, ' ').indexOf(qd) !== -1)) {
+        ocultos++;
+        return;
+      }
+      if (q) achados++;
       buckets[col].push(it);
     });
-    achados = achadosL.length;
     // Se TODOS os carregados ca\u00edram numa \u00fanica coluna, o total do Zeev PODE ser o total dela,
     // mas s\u00f3 se a lista estiver filtrada por essa etapa. O script n\u00e3o tem como saber isso:
     // a pessoa confirma com um clique, e a confirma\u00e7\u00e3o vale s\u00f3 para esse total e essa coluna.
@@ -2595,6 +2519,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var h = el('div');
       h.appendChild(el('h3', null, c.name));
       var n = list.length;
+      var somaFace = list.reduce(function (a, it) { return a + valorNum((it.info || {}).face); }, 0);
+      if (somaFace && !c.dica) c.dica = '';
       if (c.id === colTotal) {
         n = totalLista;
         var sm = el('small', null, 'Total da lista do Zeev, confirmado por voc\u00ea (' + list.length + ' nesta p\u00e1gina) ');
@@ -2610,8 +2536,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         usar.addEventListener('click', function () { stInst.totalConfirmado = chaveTotal; renderInst(); });
         sm2.appendChild(usar);
         h.appendChild(sm2);
-      } else if (c.dica) {
-        h.appendChild(el('small', null, c.dica));
+      } else if (c.dica != null) {
+        if (c.dica) h.appendChild(el('small', null, c.dica));
+        if (somaFace) h.appendChild(el('small', 'lcbk-soma', moedaCurta(somaFace) + ' em valor de face'));
       }
       head.appendChild(h);
       head.appendChild(el('span', 'lcbk-count', fmtN(n)));
@@ -2619,6 +2546,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var body = el('div', 'lcbk-list');
       if (!list.length) body.appendChild(el('p', 'lcbk-empty', q ? 'Nada com esse filtro' : 'Nada aqui'));
       list.sort(function (a, b) {
+        if (c.encerrada) return (b.fimEm ? b.fimEm.getTime() : 0) - (a.fimEm ? a.fimEm.getTime() : 0);
         if (a.late !== b.late) return a.late ? -1 : 1;
         var da = a.due && a.due.date ? a.due.date.getTime() : 8.64e15;
         var db = b.due && b.due.date ? b.due.date.getTime() : 8.64e15;
@@ -2633,15 +2561,17 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       frag.appendChild(sec);
     });
     uiI.board.replaceChildren(frag);
-    if (buscando) {
-      uiI.board.replaceChildren(viewBusca(achadosL, lidos.length, completo));
+    if (buscando && !achados) {
+      uiI.board.appendChild(el('p', 'lcbk-busca-vazia', LB.carregando && LB.q === stInst.busca
+        ? 'Procurando "' + stInst.busca + '" em todas as solicita\u00e7\u00f5es que voc\u00ea pode ver no Zeev\u2026'
+        : 'Nada encontrado para "' + stInst.busca + '". Confira a grafia, ou procure pelo n\u00famero da solicita\u00e7\u00e3o, CPF ou n\u00famero do processo.'));
     } else if (stInst.comigo && MEU.carregando && !MEU.nums) {
       uiI.board.appendChild(el('p', 'lcbk-busca-vazia', 'Buscando as suas tarefas abertas\u2026'));
     } else if (stInst.comigo && !uiI.board.children.length) {
       uiI.board.appendChild(el('p', 'lcbk-busca-vazia', MEU.erro ? 'N\u00e3o foi poss\u00edvel ler as suas tarefas abertas.'
         : 'Nenhuma solicita\u00e7\u00e3o desta lista est\u00e1 com voc\u00ea agora.'));
     }
-    uiI.board.style.setProperty('--lcbk-cols', String(buscando ? 1 : (uiI.board.children.length || 1)));
+    uiI.board.style.setProperty('--lcbk-cols', String(uiI.board.children.length || 1));
     uiI.btnComigo.classList.toggle('is-on', stInst.comigo);
     uiI.btnComigo.setAttribute('aria-pressed', stInst.comigo ? 'true' : 'false');
     uiI.btnComigo.textContent = stInst.comigo && !MEU.nums ? 'Comigo\u2026' : 'Comigo';
@@ -2689,7 +2619,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       box.appendChild(b);
     });
     uiI.resumo.replaceChildren(box);
-    uiI.resumo.style.display = stInst.view === 'kanban' && lista.length && !buscando && !(EH_GESTOR && stInst.painel) ? '' : 'none';
+    uiI.resumo.style.display = stInst.view === 'kanban' && lista.length && !(EH_GESTOR && stInst.painel) ? '' : 'none';
     renderPainel(lidos, completo, totalZeev());
     if (uiI.btnPainel) {
       uiI.btnPainel.style.display = EH_GESTOR && stInst.view === 'kanban' ? '' : 'none';
@@ -2729,7 +2659,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       (foraDoTime ? ' | ' + foraDoTime + ' de outros times' : '') +
       (buscando ? ' | busca: ' + achados + ' encontrado(s)' + (LB.carregando ? ', procurando no Zeev\u2026' : '') : '') +
       (stInst.comigo ? ' | s\u00f3 comigo' + (MEU.erro ? ' (n\u00e3o foi poss\u00edvel ler suas tarefas)' : '') : '') + ' | Kanban ' + VERSAO +
-      (ocultos && !buscando ? ' | ' + ocultos + ' oculto(s) pela busca' : '');
+      (ocultos ? ' | ' + ocultos + ' oculto(s) pela busca' : '');
     document.documentElement.classList.toggle('lcbk-on', stInst.view === 'kanban');
     $$('.lcbk-seg', uiI.bar).forEach(function (b) {
       var on = stInst.view === b.dataset.value;
@@ -2813,30 +2743,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     uiI.tools.appendChild(lbl);
     var busca = el('input', 'lcbk-search');
     busca.type = 'search';
-    busca.placeholder = 'Buscar nome, 1\u00ba nome, CPF, n\u00ba ou processo  ( / )';
-    busca.setAttribute('aria-label', 'Buscar pessoas e solicita\u00e7\u00f5es');
-    busca.title = 'Sem acento e em qualquer ordem: "rosimere", "rosi silva", "514.8", "#12132". Atalho: tecla /';
-    uiI.busca = busca;
+    busca.placeholder = 'Buscar n\u00ba, nome, CPF, processo ou atividade';
+    busca.setAttribute('aria-label', 'Buscar no Kanban');
     var tb;
     busca.addEventListener('input', function () {
       clearTimeout(tb);
-      tb = setTimeout(function () {
-        stInst.busca = clean(busca.value); stInst.limBusca = 60;
-        buscarNoZeev(stInst.busca); renderInst();
-      }, 200);
+      tb = setTimeout(function () { stInst.busca = clean(busca.value); buscarNoZeev(stInst.busca); renderInst(); }, 150);
     });
-    busca.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && busca.value) { e.preventDefault(); busca.value = ''; stInst.busca = ''; buscarNoZeev(''); renderInst(); }
-    });
-    if (!uiI.atalho) {                     // "/" em qualquer lugar da tela (fora de campos) vai para a busca
-      uiI.atalho = true;
-      document.addEventListener('keydown', function (e) {
-        var a = document.activeElement, tag = a && a.tagName;
-        if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || !uiI.busca || !document.contains(uiI.busca)) return;
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (a && a.isContentEditable)) return;
-        e.preventDefault(); uiI.busca.focus(); uiI.busca.select();
-      });
-    }
     uiI.tools.appendChild(busca);
     uiI.btnTudo = el('button', 'lcbk-btn');
     uiI.btnTudo.type = 'button';
