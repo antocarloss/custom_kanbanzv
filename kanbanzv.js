@@ -89,6 +89,8 @@
         fundo: ['fundoResponsavelAutor', 'fundoResponsavelAdvogado'],
         motivoJuridico: ['motivoDaReprovacaoProcessualDocumental', 'justificativaDiretoraJuridica', 'JustificativaCEO',
                          'justificativaDaRecusa', 'parecerSobreReprovacaoCEO', 'parecerSobreRecusaDiretoraJuridica', 'parecerDaReprovacao'],
+        pendencias: ['descricaoDasPendenciasDeDocumentos', 'ListaPendenciasJuridicas', 'pendenciaDocumentalAnaliseJuridica',
+                     'pendenciasProcessualAnaliseJuridica', 'observacaoDasPendencias', 'motivoDaReprovacaoProcessualDocumental'],
         motivoCliente: ['justificativaNegociacaoCanceladaCliente', 'justificativaDoCancelamentoCliente', 'justificativaDoCancelamento',
                         'justificativaDaRecusaDiretorFinanceiro', 'justificativaDoCancelamenoDiretorFinanceiro']
       },
@@ -108,6 +110,7 @@
       maxItens: 25000,       // teto absoluto por carga
       tamanhoPagina: 500,    // pede p\u00e1ginas grandes; se o Zeev limitar, o script se ajusta
       cardsPorColuna: 100,   // desenha at\u00e9 isso por coluna ("Mostrar mais" para o resto); contagens s\u00e3o do total
+      paralelo: 4,           // p\u00e1ginas lidas ao mesmo tempo na carga completa
       atualizarMin: 2,       // rel\u00ea a lista completa sozinho a cada X min (aba vis\u00edvel), sem piscar a tela
       atualizarMinGrande: 10,// ... e a cada Y min quando a lista passa de 2.000 itens (protege o Zeev)
       grande: 2000
@@ -867,14 +870,18 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     }
     var aceita = ['fecCom', 'cessao', 'fechados'].indexOf(colId) !== -1;
 
-    var perdidaCol = /^perd/.test(colId || '');
+    var perdidaCol = /^perd|^rejJur/.test(colId || '');
     var rotProp = colId === 'fechados' ? 'Valor pago' : aceita ? 'Proposta aceita' : perdidaCol ? '\u00daltima proposta' : 'Proposta vigente';
     if (info.face) linhas.push([info.faceRot ? 'Valor de face (honor\u00e1rios)' : 'Valor de face', info.face, '', 'is-face']);
     if (info.proposta) linhas.push([rotProp, info.proposta, '', 'is-valor']);
     else if (info.semProposta) linhas.push([rotProp, 'sem proposta', '', 'is-vazio']);
     var elMot = null;
-    if (perdidaCol) {
-      var mot = colId === 'perdJur' ? (info.motJur || info.motCli) : (info.motCli || info.motJur);
+    if (colId === 'pendencias' && info.pend) {
+      elMot = el('div', 'lcbk-motivo is-pend', 'Pend\u00eancia: ' + info.pend.replace(/^\s*pend[e\u00ea]ncias?\s*:\s*/i, ''));
+      elMot.title = info.pend;
+    }
+    if (perdidaCol || colId === 'rejJur') {
+      var mot = colId === 'perdJur' || colId === 'rejJur' ? (info.motJur || info.motCli) : (info.motCli || info.motJur);
       mot = (mot || '').replace(/^\s*motivo\s*:\s*/i, '').replace(/[\s,;:\u2013-]+$/, '');
       elMot = el('div', 'lcbk-motivo', mot ? 'Motivo: ' + mot : 'Motivo n\u00e3o informado no formul\u00e1rio');
       if (mot) elMot.title = mot;
@@ -1379,6 +1386,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-info dd.is-vazio{color:#6b778c;font-style:italic;font-weight:400}',
       '.lcbk-soma.is-prop{color:#1b2f5c!important}',
       '.lcbk-motivo{margin-top:6px;font-size:11.5px;line-height:1.35;color:#a1281f;background:#fbeceb;border-radius:6px;padding:6px 8px}',
+      '.lcbk-motivo.is-pend{color:#7a4b00;background:#fff4e0}',
       '.lcbk-mais{width:100%;margin-top:4px;background:#fff}',
       '.lcbk-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#404857;cursor:pointer}',
       '.lcbk-chip.is-area{background:#f1f2f5;color:#404857}',
@@ -1579,6 +1587,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       if (!info.procNum && R.processo.test(r)) { info.procNum = v; return; }
       if (!info.face && R.face.test(r)) { info.face = moeda(v); return; }
       if (!info.tipo && R.tipo.test(r)) { info.tipo = v; return; }
+      if (!info.desq && /desqualifica/.test(r)) { info.desq = v; return; }
+      if (!info.viab && /^viabilidade/.test(r)) { info.viab = v; return; }
       if (/n[u\u00fa]mero/.test(r)) return;                       // "n\u00famero da proposta" n\u00e3o \u00e9 valor
       for (var i = 0; i < R.propostas.length; i++) {
         if (R.propostas[i][0].test(r) && /\d/.test(v)) { props.push({ ordem: i, valor: moeda(v), rotulo: R.propostas[i][1] }); break; }
@@ -1680,15 +1690,27 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   //  cancelada/recusada/reprovada/rejeitada.
   var RE_PERDA = /cancel|recus|reprov|rejeit|perd|desist|desqualif/i;
   function perdida(it) { return RE_PERDA.test((it.status || '') + ' ' + (it.resultado || '')); }
+  // Triagem: lead rejeitado = desqualificado (motivo no resumo), viabilidade "desqualificado" ou encerrado como rejeitado/cancelado
+  function rejeitadoTriagem(it) {
+    var inf = it.info || {};
+    return !!(inf.desq || /desqualific/i.test(inf.viab || '') || perdida(it));
+  }
+  function motivoRejeicao(it) {
+    var inf = it.info || {};
+    return clean(inf.desq) || (/desqualific/i.test(inf.viab || '') ? 'Desqualificado (motivo n\u00e3o informado)' : 'Motivo n\u00e3o informado');
+  }
+  function slug(t) { return 'm_' + lower(t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').slice(0, 60); }
+  var REJ = { cols: [] };          // colunas do pipeline Rejeitados (montadas a partir dos motivos da lista)
   function layoutEsteiraInst(id) {
     if (id === 'comercial') return {
       nome: CFG.esteiras[id].nome,
       esteira: id,
       cols: function () {
+        var nomes = { ppp: 'PPP (cliente n\u00e3o responde)', negociacao: 'PPP Negocia\u00e7\u00e3o' };
         return colunasEsteira(id).filter(function (c) { return ['ppp', 'negociacao', 'proposta', 'pendencias'].indexOf(c.id) !== -1; })
-          .map(function (c) { c.precisaB = false; return c; })
-          .concat([{ id: 'fecCom', name: 'Fechado comercialmente', ok: true, dica: 'proposta aceita, em formaliza\u00e7\u00e3o (fora as pend\u00eancias)' },
-                   { id: 'cessao', name: 'Fundo & Cess\u00e3o', dica: 'T23 e T24 em andamento' },
+          .map(function (c) { c.precisaB = false; if (nomes[c.id]) c.name = nomes[c.id]; return c; })
+          .concat([{ id: 'fecCom', name: 'Proposta Aceita', ok: true, dica: 'em formaliza\u00e7\u00e3o (fora as pend\u00eancias)' },
+                   { id: 'cessao', name: 'Proposta assinada pelo cliente', dica: 'T23 e T24 em andamento' },
                    { id: 'fechados', name: 'Fechados (PAGO)', ok: true, dica: 'passou da T24 ou conclu\u00edda', encerrada: true },
                    { id: 'perdJur', name: 'Perdidas \u00b7 rejeitada pelo jur\u00eddico', alert: true, dica: 'passou pela reprova\u00e7\u00e3o (T11, T15 ou T16)', encerrada: true },
                    { id: 'perdCli', name: 'Perdidas \u00b7 rejeitada pelo cliente', alert: true, dica: 'cancelada ou recusada pelo cliente', encerrada: true },
@@ -1717,6 +1739,39 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         return ['ppp', 'negociacao', 'proposta'].indexOf(c2) !== -1 ? c2 : 'outros';
       }
     };
+    if (id === 'juridico') return {
+      nome: CFG.esteiras[id].nome,
+      esteira: id,
+      cols: function () {
+        return colunasEsteira(id).map(function (c) { c.precisaB = false; if (c.id === 'pos') { c.name = 'Pagos'; c.ok = true; } return c; })
+          .concat([{ id: 'rejJur', name: 'Rejeitadas pelo Jur\u00eddico', alert: true, encerrada: true,
+                     dica: PERDA.carregando ? 'lendo o hist\u00f3rico das negocia\u00e7\u00f5es\u2026' : 'passou pela reprova\u00e7\u00e3o (T11, T15 ou T16)' },
+                   { id: 'outros', name: 'Outras \u00e1reas', opcional: true, outras: true }]);
+      },
+      place: function (it) {
+        if (!it.ativo) {
+          if (it.tipo !== 'filho' || !perdida(it)) return 'outros';
+          if (!PERDA.porSol && !PERDA.carregando && !PERDA.erro) setTimeout(carregarMotivosPerda, 0);
+          return PERDA.porSol && PERDA.porSol[it.num] === 'juridico' ? 'rejJur' : 'outros';
+        }
+        return colunaDe(id, it);
+      }
+    };
+    if (id === 'triagem') return {
+      nome: CFG.esteiras[id].nome,
+      esteira: id,
+      cols: function () {
+        return colunasEsteira(id).filter(function (c) { return c.id !== 'negociacao'; })
+          .map(function (c) { c.precisaB = false; return c; })
+          .concat([{ id: 'rejeitadas', name: 'Rejeitadas', alert: true, encerrada: true },
+                   { id: 'outros', name: 'Outras \u00e1reas', opcional: true, outras: true }]);
+      },
+      place: function (it) {
+        if (!it.ativo) return it.tipo !== 'filho' && rejeitadoTriagem(it) ? 'rejeitadas' : 'outros';
+        var c = colunaDe(id, it);
+        return c === 'negociacao' ? 'outros' : c;
+      }
+    };
     return {
       nome: CFG.esteiras[id].nome,
       esteira: id,
@@ -1736,6 +1791,17 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     comercial: layoutEsteiraInst('comercial'),
     juridico: layoutEsteiraInst('juridico'),
     triagem: layoutEsteiraInst('triagem'),
+    rejeitados: {
+      nome: 'Rejeitados (por motivo)',
+      esteira: 'rejeitados',
+      cols: function () {
+        return REJ.cols.concat([{ id: 'outros', name: 'Outras \u00e1reas', opcional: true, outras: true }]);
+      },
+      place: function (it) {
+        if (it.ativo || it.tipo === 'filho' || !rejeitadoTriagem(it)) return 'outros';
+        return slug(motivoRejeicao(it));
+      }
+    },
     status: {
       nome: 'Por status',
       cols: function () {
@@ -1875,12 +1941,15 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   function carregarTudo() {
     if (LC.carregando || !LC.url) return;
-    var u = new URL(LC.url);
-    var base = baseDe(u.href);
+    var u0 = new URL(LC.url);
+    var base = baseDe(u0.href);
     var total = totalZeev();
-    var rpp = CFG.lista.tamanhoPagina, p = 1, itens = [], vistos = {};
+    var rpp = CFG.lista.tamanhoPagina, itens = [], vistos = {};
     LC.carregando = true; LC.cancelar = false; LC.erro = ''; LC.base = base; LC.parcial = itens;
+    var acabou = false;
     function fim(msg) {
+      if (acabou) return;
+      acabou = true;
       LC.carregando = false; LC.prog = ''; LC.parcial = null;
       if (LC.cancelar) setTimeout(agendarAuto, 50);          // come\u00e7a a carga da lista nova
       if (msg) { LC.erro = msg; LC.completo = null; }
@@ -1891,34 +1960,64 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       }
       renderInst();
     }
-    function proxima() {
-      if (LC.cancelar || base !== LC.base) { LC.cancelar = true; return fim(''); }
-      LC.prog = 'Carregando ' + fmtN(itens.length) + (total ? ' de ' + fmtN(total) : '') + '\u2026';
-      renderInst();
+    function pagina(p) {
+      var u = new URL(u0.href);
       u.searchParams.set('pagenumber', String(p));
       u.searchParams.set('recordsperpage', String(rpp));
-      getJson(nossa(u.href)).then(function (j) {
+      return getJson(nossa(u.href)).then(function (j) {
         var sx = j && j.success, lote = (sx && sx.itens) || [];
-        // o Zeev pode limitar o tamanho da p\u00e1gina: a 1\u00aa resposta diz o tamanho real
-        if (p === 1 && sx && sx.hasmoreitens && lote.length && lote.length < rpp) rpp = lote.length;
         lote.forEach(function (x) {
           var it = daApi(x);
           if (it.num && !vistos[it.num]) { vistos[it.num] = 1; itens.push(it); }
         });
-        if (!sx || !sx.hasmoreitens || !lote.length || itens.length >= CFG.lista.maxItens) return fim('');
-        // carregou mais do que a lista da p\u00e1gina tem: est\u00e1 lendo outra lista. Para e recome\u00e7a (at\u00e9 2 vezes).
-        var tAgora = totalZeev();
-        if (tAgora && itens.length > tAgora + rpp) {
-          LC.reinicios = (LC.reinicios || 0) + 1;
-          if (LC.reinicios > 2) return fim('a lista mudou durante a carga; clique em Atualizar');
-          LC.cancelar = true;
+        return { mais: !!(sx && sx.hasmoreitens), n: lote.length };
+      });
+    }
+    var tRender = 0;
+    function progresso() {
+      LC.prog = 'Carregando ' + fmtN(itens.length) + (total ? ' de ' + fmtN(total) : '') + '\u2026';
+      var agora = Date.now();
+      if (agora - tRender > 400) { tRender = agora; renderInst(); }
+    }
+    function mudou() { return LC.cancelar || base !== LC.base; }
+    progresso();
+    // 1\u00aa p\u00e1gina: descobre o tamanho real da p\u00e1gina; depois as outras v\u00e3o em paralelo
+    pagina(1).then(function (r1) {
+      if (mudou()) { LC.cancelar = true; return fim(''); }
+      if (!r1.mais || !r1.n) return fim('');
+      if (r1.n < rpp) rpp = r1.n;                           // o Zeev limitou o tamanho da p\u00e1gina
+      var limite = Math.min(total || CFG.lista.maxItens, CFG.lista.maxItens);
+      var ultima = Math.max(2, Math.ceil(limite / rpp));
+      var prox = 2, ativos = 0, parar = false;
+      function disparar() {
+        if (mudou()) { LC.cancelar = true; return fim(''); }
+        if (parar && !ativos) return fim('');
+        while (!parar && ativos < CFG.lista.paralelo && prox <= ultima) {
+          (function (p) {
+            ativos++;
+            pagina(p).then(function (r) {
+              ativos--;
+              if (!r.n || !r.mais) { if (p >= ultima || !r.n) parar = true; }
+              var tAgora = totalZeev();
+              if (tAgora && itens.length > tAgora + rpp) {          // est\u00e1 lendo outra lista
+                LC.reinicios = (LC.reinicios || 0) + 1;
+                if (LC.reinicios > 2) return fim('a lista mudou durante a carga; clique em Atualizar');
+                LC.cancelar = true; return fim('');
+              }
+              if (itens.length >= CFG.lista.maxItens) parar = true;
+              progresso();
+              disparar();
+            }).catch(function (e) { ativos--; parar = true; fim('n\u00e3o foi poss\u00edvel carregar a lista completa (' + (e && e.message) + ')'); });
+          })(prox++);
+        }
+        if (prox > ultima && !ativos) {
+          // o total da p\u00e1gina pode estar desatualizado: se a \u00faltima ainda tinha mais, continua uma a uma
+          parar = true;
           return fim('');
         }
-        p++;
-        setTimeout(proxima, 120);                          // sem rajada no servidor
-      }).catch(function (e) { fim('n\u00e3o foi poss\u00edvel carregar a lista completa (' + (e && e.message) + ')'); });
-    }
-    proxima();
+      }
+      disparar();
+    }).catch(function (e) { fim('n\u00e3o foi poss\u00edvel carregar a lista completa (' + (e && e.message) + ')'); });
   }
   var tAuto;
   function agendarAuto() {
@@ -1926,7 +2025,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     tAuto = setTimeout(function () {
       var total = totalZeev();
       if (!LC.completo && !LC.carregando && !LC.erro && LC.url && total && total <= CFG.lista.autoAte) carregarTudo();
-    }, 400);
+    }, 1200);                                                // espera o Zeev aplicar o filtro salvo
   }
   // \u2500\u2500 atualiza\u00e7\u00e3o autom\u00e1tica: rel\u00ea a lista completa em segundo plano quando ela fica velha.
   // Os cards antigos continuam na tela at\u00e9 a nova leitura terminar (troca sem piscar).
@@ -2041,6 +2140,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     layout: LAYOUTS_INST[ls(CFG.keys.layoutInst)] ? ls(CFG.keys.layoutInst) : '',   // vazio = autom\u00e1tico
     outras: ls('lcbKanbanOutras') === '1',
     ator: '',
+    etapa: '',
     comigo: false,
     lim: {},
     painel: ls('lcbKanbanPainel') !== '0',
@@ -2233,6 +2333,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var corta = function (t) { t = semDoc(t); return t.length > 220 ? t.slice(0, 217) + '\u2026' : t; };
       o.motJur = corta(pega(r, F.motivoJuridico));
       o.motCli = corta(pega(r, F.motivoCliente));
+      var pend = [];
+      F.pendencias.forEach(function (nome) { var k = ix(nome); if (k >= 0 && clean(r[k]) && pend.length < 2 && pend.indexOf(clean(r[k])) === -1) pend.push(clean(r[k])); });
+      o.pend = corta(pend.join(' \u00b7 '));
       por[sol] = o;
     });
     return linhas.length - 1;
@@ -2268,7 +2371,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (f.face && f.prop) inf.desagio = Math.max(0, 1 - f.prop / f.face);
     if (f.tipo && !inf.tipo) inf.tipo = f.tipo;
     inf.nProp = f.nProp; inf.fundo = f.fundo;
-    inf.motJur = f.motJur; inf.motCli = f.motCli;
+    inf.motJur = f.motJur; inf.motCli = f.motCli; inf.pend = f.pend;
   }
 
   var PERDA = { porSol: null, carregando: false, erro: '', em: null, consultas: 0, incompleto: 0 };
@@ -2669,7 +2772,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     // s\u00f3 entram processos em etapas do jur\u00eddico (a menos que "Mostrar outras \u00e1reas" esteja marcado).
     var foraDaArea = 0, foraDoTime = 0;
     var buscando = !!stInst.busca;
-    if (layoutId === 'comercial' && lidos.some(function (it) { return it.tipo === 'filho'; })) {
+    if ((layoutId === 'comercial' || layoutId === 'juridico') && lidos.some(function (it) { return it.tipo === 'filho'; })) {
       var velhoF = !FORM.em || FORM.base !== LC.base || Date.now() - FORM.em.getTime() > 10 * 60000;
       if (velhoF && !FORM.carregando && !(FORM.erro && FORM.base === LC.base)) setTimeout(carregarFormularios, 0);
       lidos.forEach(enriquecer);
@@ -2704,7 +2807,29 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     });
     if (stInst.ator && !atores[stInst.ator]) stInst.ator = '';
     var itens = stInst.ator && !semRecorte ? todos.filter(function (it) { return chaveAtor(it) === stInst.ator; }) : todos;
+    if (layoutId === 'rejeitados') {                                  // colunas = motivos presentes na lista
+      var cont = {}, nomeM = {};
+      lidos.forEach(function (it) {
+        if (it.ativo || it.tipo === 'filho' || !rejeitadoTriagem(it)) return;
+        var m = motivoRejeicao(it), k = slug(m);
+        cont[k] = (cont[k] || 0) + 1; nomeM[k] = nomeM[k] || m;
+      });
+      REJ.cols = Object.keys(cont).sort(function (a, b) { return cont[b] - cont[a]; })
+        .map(function (k) { return { id: k, name: nomeM[k], alert: true, encerrada: true }; });
+    }
     var cols = L.cols(), buckets = {}, q = stInst.busca.toLowerCase(), ocultos = 0, achados = 0;
+    // filtro de etapa: op\u00e7\u00f5es = colunas da esteira atual
+    if (uiI.fEtapa) {
+      var opE = [['', 'Etapa: todas']].concat(cols.filter(function (c) { return c.id !== 'outros'; }).map(function (c) { return [c.id, c.name]; }));
+      var chaveE = opE.map(function (o) { return o[0]; }).join('|');
+      if (uiI.fEtapa._chave !== chaveE) {
+        uiI.fEtapa._chave = chaveE;
+        uiI.fEtapa.replaceChildren();
+        opE.forEach(function (o) { var op = el('option', null, o[1]); op.value = o[0]; uiI.fEtapa.appendChild(op); });
+      }
+      if (stInst.etapa && chaveE.split('|').indexOf(stInst.etapa) === -1) stInst.etapa = '';
+      uiI.fEtapa.value = stInst.etapa;
+    }
     cols.forEach(function (c) { buckets[c.id] = []; });
     itens.forEach(function (it) {
       var col = L.place(it);
@@ -2732,6 +2857,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var frag = document.createDocumentFragment();
     cols.forEach(function (c) {
       var list = buckets[c.id];
+      if (stInst.etapa && c.id !== stInst.etapa) return;               // filtro de etapa
       if (c.opcional && !list.length) return;
       if (semRecorte && !list.length) return;                          // na busca e no "Comigo", s\u00f3 colunas com cards
       var sec = el('section', 'lcbk-col' + (c.alert ? ' is-alert' : '') + (c.ok ? ' is-ok' : ''));
@@ -2741,7 +2867,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var n = list.length;
       var somaFace = list.reduce(function (a, it) { var f = it.info || {}; return a + (f.faceN || valorNum(f.face)); }, 0);
       var somaProp = list.reduce(function (a, it) { return a + ((it.info || {}).propN || 0); }, 0);
-      if (somaFace && !c.dica) c.dica = '';
+      if ((somaFace || somaProp) && !c.dica) c.dica = '';
       if (c.id === colTotal) {
         n = totalLista;
         var sm = el('small', null, 'Total da lista do Zeev, confirmado por voc\u00ea (' + list.length + ' nesta p\u00e1gina) ');
@@ -2759,10 +2885,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         h.appendChild(sm2);
       } else if (c.dica != null) {
         if (c.dica) h.appendChild(el('small', null, c.dica));
-        if (somaFace) h.appendChild(el('small', 'lcbk-soma', moedaBR(somaFace) + ' em valor de face'));
-        if (somaProp && ['fecCom', 'cessao', 'fechados'].indexOf(c.id) !== -1) {
-          h.appendChild(el('small', 'lcbk-soma is-prop', moedaBR(somaProp) + (c.id === 'fechados' ? ' pagos' : ' em propostas aceitas')));
-        }
+        if (somaFace) h.appendChild(el('small', 'lcbk-soma', 'Valor de Face: ' + moedaBR(somaFace)));
+        if (somaProp) h.appendChild(el('small', 'lcbk-soma is-prop', 'Valor de Desembolso: ' + moedaBR(somaProp)));
       }
       head.appendChild(h);
       head.appendChild(el('span', 'lcbk-count', fmtN(n)));
@@ -2942,10 +3066,15 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     });
     uiI.layout.addEventListener('change', function () {
       stInst.layout = uiI.layout.value;
+      stInst.etapa = '';
       ls(CFG.keys.layoutInst, stInst.layout);
       renderInst();
     });
     uiI.tools.appendChild(uiI.layout);
+    uiI.fEtapa = el('select', 'lcbk-select');
+    uiI.fEtapa.setAttribute('aria-label', 'Mostrar s\u00f3 uma etapa');
+    uiI.fEtapa.addEventListener('change', function () { stInst.etapa = uiI.fEtapa.value; renderInst(); });
+    uiI.tools.appendChild(uiI.fEtapa);
     uiI.fAtor = el('select', 'lcbk-select');
     uiI.fAtor.setAttribute('aria-label', 'Filtrar por quem est\u00e1 com a atividade');
     uiI.fAtor.addEventListener('change', function () { stInst.ator = uiI.fAtor.value; renderInst(); });
