@@ -112,6 +112,7 @@
       cardsPorColuna: 100,   // desenha at\u00e9 isso por coluna ("Mostrar mais" para o resto); contagens s\u00e3o do total
       paralelo: 4,           // p\u00e1ginas lidas ao mesmo tempo na carga completa
       cacheHoras: 12,        // validade da c\u00f3pia local criptografada da lista
+      funilAcima: 3000,      // esteira comercial/jur\u00eddica numa lista maior que isso, sem filtro de fluxo: carrega s\u00f3 o funil
       atualizarMin: 2,       // rel\u00ea a lista completa sozinho a cada X min (aba vis\u00edvel), sem piscar a tela
       atualizarMinGrande: 10,// ... e a cada Y min quando a lista passa de 2.000 itens (protege o Zeev)
       grande: 2000
@@ -1900,7 +1901,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       LC.url = x.href;
       if (b !== LC.base) { LC.reinicios = 0; LC.erro = ''; }    // lista nova: zera erros da anterior
       if (LC.completo && LC.completo.base !== b) { LC.completo = null; LC.erro = ''; }  // filtro mudou
-      if (!LC.completo && !LC.carregando) restaurarCache(b);
+      if (!LC.completo && !LC.carregando) setTimeout(function () { restaurarCache(b); }, 0);
       else if (LC.completo && !LC.carregando && velho(LC.completo)) setTimeout(carregarTudo, 300);
       LC.base = b;
       agendarAuto();
@@ -1948,8 +1949,52 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       tipo: tipo, stage: cl.etapa, area: cl.area
     };
   }
+  // \u2550\u2550\u2550 MODO FUNIL \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+  // Esteira comercial ou jur\u00eddica numa lista grande SEM filtro de fluxo: em vez da lista inteira,
+  // o Kanban busca no Zeev s\u00f3 o que a esteira usa (mesma permiss\u00e3o e mesmos filtros da p\u00e1gina):
+  //  jur\u00eddica = negocia\u00e7\u00f5es (Filhos), todas as situa\u00e7\u00f5es;
+  //  comercial = Filhos + Pai, Carteira e Relacionamento EM ANDAMENTO (para o PPP).
+  function modoNecessario() {
+    var lay = layoutInstAtivo();
+    if ((lay !== 'comercial' && lay !== 'juridico') || !LC.url) return '';
+    if (new URL(LC.url).searchParams.get('codFlowsOrServices')) return '';
+    var t = totalZeev();
+    return t && t > CFG.lista.funilAcima ? lay : '';
+  }
+  function serve(tem, precisa) {                               // a carga 'tem' atende a esteira 'precisa'?
+    if (!precisa) return !tem;
+    return !tem || tem === precisa || (precisa === 'juridico' && tem === 'comercial');
+  }
+  function completoServe() {
+    return !!(LC.completo && LC.completo.base === LC.base && serve(LC.completo.funil || '', modoNecessario()));
+  }
+  function fontesFunil(modo, u0) {
+    var F = CFG.producao.fluxos, fontes = [];
+    F.forEach(function (f) {
+      var papel = f[2], status = null;
+      if (papel !== 'filho') {
+        if (modo !== 'comercial') return;
+        status = 'S';                                         // Pai/Carteira/Relacionamento: s\u00f3 em andamento
+      }
+      var u = new URL(u0.href);
+      u.searchParams.set('codFlowsOrServices', f[0] + ';' + f[1] + ';0;0');
+      if (status && !u.searchParams.get('flowStatus')) u.searchParams.set('flowStatus', status);
+      fontes.push(u.href);
+    });
+    return fontes;
+  }
+  function contar(href) {
+    var u = new URL(href);
+    u.pathname = u.pathname.replace(/\/instances\/?$/, '/instances/count');
+    u.searchParams.delete('pagenumber'); u.searchParams.delete('recordsperpage');
+    return getJson(nossa(u.href)).then(function (j) { return (j && j.success && +j.success.count) || 0; })
+      .catch(function () { return 0; });
+  }
+
   function carregarTudo() {
     if (LC.carregando || !LC.url) return;
+    var modo = modoNecessario();
+    if (modo) return carregarFunil(modo);
     var u0 = new URL(LC.url);
     var base = baseDe(u0.href);
     var total = totalZeev();
@@ -2031,12 +2076,77 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       disparar();
     }).catch(function (e) { fim('n\u00e3o foi poss\u00edvel carregar a lista completa (' + (e && e.message) + ')'); });
   }
+  function carregarFunil(modo) {
+    var u0 = new URL(LC.url), base = baseDe(u0.href);
+    var fontes = fontesFunil(modo, u0), itens = [], vistos = {}, acabou = false, total = 0;
+    LC.carregando = true; LC.cancelar = false; LC.erro = ''; LC.base = base; LC.parcial = itens;
+    var tRender = 0;
+    function progresso() {
+      LC.prog = 'Carregando o funil ' + (modo === 'comercial' ? 'comercial' : 'jur\u00eddico') + ': ' + fmtN(itens.length) + (total ? ' de ' + fmtN(total) : '') + '\u2026';
+      if (Date.now() - tRender > 400) { tRender = Date.now(); renderInst(); }
+    }
+    function mudou() { return LC.cancelar || base !== LC.base || !serve(modo, modoNecessario()); }
+    function fim(msg) {
+      if (acabou) return;
+      acabou = true;
+      LC.carregando = false; LC.prog = ''; LC.parcial = null;
+      var trocou = LC.cancelar || base !== LC.base || !serve(modo, modoNecessario());
+      if (msg) { LC.erro = msg; LC.completo = null; }
+      else if (!trocou) {
+        LC.completo = { base: base, itens: itens, em: new Date(), total: itens.length, funil: modo };
+        setTimeout(salvarCache, 0);
+      }
+      if (trocou) setTimeout(agendarAuto, 50);
+      renderInst();
+    }
+    function pagina(href, p, rpp) {
+      var u = new URL(href);
+      u.searchParams.set('pagenumber', String(p));
+      u.searchParams.set('recordsperpage', String(rpp));
+      return getJson(nossa(u.href)).then(function (j) {
+        var sx = j && j.success, lote = (sx && sx.itens) || [];
+        lote.forEach(function (x) {
+          var it = daApi(x);
+          if (it.num && !vistos[it.num]) { vistos[it.num] = 1; itens.push(it); }
+        });
+        return lote.length;
+      });
+    }
+    function lerFonte(href) {
+      return contar(href).then(function (n) {
+        total += n;
+        var rpp = CFG.lista.tamanhoPagina;
+        if (!n) return pagina(href, 1, rpp);                  // sem contagem: s\u00f3 a 1\u00aa p\u00e1gina
+        var paginas = Math.ceil(n / rpp), prox = 1, ativos = 0;
+        return new Promise(function (ok, erro) {
+          function disparar() {
+            if (acabou || mudou()) return ok();
+            if (prox > paginas && !ativos) return ok();
+            while (ativos < CFG.lista.paralelo && prox <= paginas) {
+              ativos++;
+              pagina(href, prox++, rpp).then(function () { ativos--; progresso(); disparar(); }, function (e) { ativos--; erro(e); });
+            }
+          }
+          disparar();
+        });
+      });
+    }
+    progresso();
+    var i = 0;
+    (function prox() {
+      if (acabou) return;
+      if (mudou()) { LC.cancelar = true; return fim(''); }
+      if (i >= fontes.length) return fim('');
+      lerFonte(fontes[i++]).then(prox, function (e) { fim('n\u00e3o foi poss\u00edvel carregar o funil (' + (e && e.message) + ')'); });
+    })();
+  }
+
   var tAuto;
   function agendarAuto() {
     clearTimeout(tAuto);
     tAuto = setTimeout(function () {
       var total = totalZeev();
-      if (!LC.completo && !LC.carregando && !LC.erro && LC.url && total && total <= CFG.lista.autoAte) carregarTudo();
+      if (!completoServe() && !LC.carregando && !LC.erro && LC.url && total && total <= CFG.lista.autoAte) carregarTudo();
     }, 1200);                                                // espera o Zeev aplicar o filtro salvo
   }
   // \u2500\u2500 atualiza\u00e7\u00e3o autom\u00e1tica: rel\u00ea a lista completa em segundo plano quando ela fica velha.
@@ -2051,7 +2161,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       if (document.visibilityState !== 'visible') return;
       if (MODO === 'tarefas') {
         if (!LT.carregando && LT.completo && LT.completo.base === LT.base && velho(LT.completo)) { buscarContagem(); carregarTarefas(); }
-      } else if (!LC.carregando && LC.completo && LC.completo.base === LC.base && velho(LC.completo)) {
+      } else if (!LC.carregando && completoServe() && velho(LC.completo)) {
         carregarTudo();
       }
     };
@@ -2099,16 +2209,17 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   function salvarCache() {
     if (!CACHE.ok || !LC.completo) return;
-    var base = LC.completo.base;
+    var base = LC.completo.base, chaveC = base + '|' + (LC.completo.funil || '');
     var pacote = {
       itens: LC.completo.itens.map(function (it) { var c = {}; for (var k in it) if (k !== 'tr') c[k] = it[k]; return c; }),
+      funil: LC.completo.funil || '',
       em: LC.completo.em, total: LC.completo.total,
       form: FORM.base === base ? { porSol: FORM.porSol, em: FORM.em } : null,
       perda: PERDA.porSol ? { porSol: PERDA.porSol, em: PERDA.em } : null
     };
     abrirCache().then(function (db) {
       var iv = crypto.getRandomValues(new Uint8Array(12));
-      return Promise.all([idCache(base), crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, CACHE.chave,
+      return Promise.all([idCache(chaveC), crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, CACHE.chave,
         new TextEncoder().encode(JSON.stringify(pacote)))]).then(function (r) {
         var tx = db.transaction('listas', 'readwrite');
         tx.objectStore('listas').put({ k: r[0], iv: iv, dados: r[1], em: Date.now() });
@@ -2119,6 +2230,40 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function restaurarCache(base) {
     if (!CACHE.ok || CACHE.restaurando === base) return;
     CACHE.restaurando = base;
+    var precisa = modoNecessario();
+    var chaves = precisa === 'juridico' ? ['juridico', 'comercial'] : [precisa];
+    abrirCache().then(function (db) {
+      var tentar = function (ix) {
+        if (ix >= chaves.length) return Promise.resolve(null);
+        return lerReg(db, base + '|' + chaves[ix]).then(function (r) { return r || tentar(ix + 1); });
+      };
+      return tentar(0);
+    }).then(function (p2) {
+      if (!p2 || LC.completo || LC.base !== base) return;
+      var agora = new Date();
+      p2.itens.forEach(function (it) { if (it.ativo && it.due && it.due.date) it.late = it.due.date < agora; });
+      LC.completo = { base: base, itens: p2.itens, em: new Date(p2.em), total: p2.total, daCopia: true, funil: p2.funil || '' };
+      if (p2.form && !FORM.em) { FORM.porSol = p2.form.porSol; FORM.em = new Date(p2.form.em); FORM.base = base; }
+      if (p2.perda && !PERDA.porSol) { PERDA.porSol = p2.perda.porSol; PERDA.em = new Date(p2.perda.em); }
+      renderInst();
+      setTimeout(function () { if (!LC.carregando) carregarTudo(); }, 300);   // atualiza em segundo plano
+    }).catch(function () { /* c\u00f3pia ileg\u00edvel ou ausente: carga normal */ })
+      .then(function () { if (CACHE.restaurando === base) CACHE.restaurando = null; });
+  }
+  function lerReg(db, chave) {
+    return idCache(chave).then(function (id) {
+      return new Promise(function (ok) {
+        var req = db.transaction('listas').objectStore('listas').get(id);
+        req.onsuccess = function () { ok(req.result); }; req.onerror = function () { ok(null); };
+      });
+    }).then(function (reg) {
+      if (!reg || Date.now() - reg.em > CFG.lista.cacheHoras * 3600000) return null;
+      return crypto.subtle.decrypt({ name: 'AES-GCM', iv: reg.iv }, CACHE.chave, reg.dados).then(function (buf) {
+        return JSON.parse(new TextDecoder().decode(buf), function (k, v) { return typeof v === 'string' && RE_DATA_ISO.test(v) ? new Date(v) : v; });
+      });
+    });
+  }
+  function restaurarCacheAntigo(base) {
     abrirCache().then(function (db) {
       return idCache(base).then(function (id) {
         return new Promise(function (ok) {
@@ -2147,7 +2292,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
 
   function itensDaLista() {
-    if (LC.completo && LC.completo.base === LC.base) return LC.completo.itens.slice();
+    if (completoServe()) return LC.completo.itens.slice();
     if (LC.carregando && LC.parcial && LC.parcial.length) return LC.parcial.slice();   // vai preenchendo
     return lerInstancias();
   }
@@ -2864,7 +3009,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function renderInst() {
     if (!uiI.board) return;
     var lidos = itensDaLista();
-    var completo = !!(LC.completo && LC.completo.base === LC.base);
+    var completo = completoServe();
+    if (!completo && LC.completo && LC.completo.base === LC.base && !LC.carregando) setTimeout(agendarAuto, 0);   // esteira pede outra carga
     var layoutId = layoutInstAtivo();
     var L = LAYOUTS_INST[layoutId];
     // O resumo por pessoa e o filtro "Com quem" seguem a esteira escolhida: na Esteira jur\u00eddica,
@@ -3111,7 +3257,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (LC.carregando) uiI.btnTudo.textContent = LC.prog + ' Cancelar';
     uiI.btnAtual.style.display = completo && !LC.carregando && stInst.view === 'kanban' ? '' : 'none';
     var origem = completo
-      ? (LC.completo.limitado ? fmtN(lidos.length) + ' de ' + fmtN(total) + ' carregados'
+      ? (LC.completo.funil ? 'Funil ' + (LC.completo.funil === 'comercial' ? 'comercial' : 'jur\u00eddico') + ': ' + fmtN(lidos.length) + ' carregadas (s\u00f3 o que a esteira usa)'
+         : LC.completo.limitado ? fmtN(lidos.length) + ' de ' + fmtN(total) + ' carregados'
                               : 'Todas as ' + fmtN(lidos.length) + ' carregadas') +
         ' \u00e0s ' + LC.completo.em.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
       : (total ? lidos.length + ' de ' + fmtN(total) : lidos.length + ' nesta p\u00e1gina');
