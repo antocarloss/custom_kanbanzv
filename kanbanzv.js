@@ -111,6 +111,7 @@
       tamanhoPagina: 500,    // pede p\u00e1ginas grandes; se o Zeev limitar, o script se ajusta
       cardsPorColuna: 100,   // desenha at\u00e9 isso por coluna ("Mostrar mais" para o resto); contagens s\u00e3o do total
       paralelo: 4,           // p\u00e1ginas lidas ao mesmo tempo na carga completa
+      cacheHoras: 12,        // validade da c\u00f3pia local criptografada da lista
       atualizarMin: 2,       // rel\u00ea a lista completa sozinho a cada X min (aba vis\u00edvel), sem piscar a tela
       atualizarMinGrande: 10,// ... e a cada Y min quando a lista passa de 2.000 itens (protege o Zeev)
       grande: 2000
@@ -1897,7 +1898,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       if (LC.carregando && b === LC.base) return;            // s\u00e3o as nossas pr\u00f3prias consultas
       if (LC.carregando) LC.cancelar = true;                  // filtro mudou no meio da carga: para a antiga
       LC.url = x.href;
+      if (b !== LC.base) { LC.reinicios = 0; LC.erro = ''; }    // lista nova: zera erros da anterior
       if (LC.completo && LC.completo.base !== b) { LC.completo = null; LC.erro = ''; }  // filtro mudou
+      if (!LC.completo && !LC.carregando) restaurarCache(b);
       else if (LC.completo && !LC.carregando && velho(LC.completo)) setTimeout(carregarTudo, 300);
       LC.base = b;
       agendarAuto();
@@ -1963,6 +1966,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         LC.reinicios = 0;
         LC.completo = { base: base, itens: itens, em: new Date(), total: total,
                         limitado: !!(total && total > itens.length && itens.length >= CFG.lista.maxItens) };
+        setTimeout(salvarCache, 0);
       }
       renderInst();
     }
@@ -2003,6 +2007,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
             ativos++;
             pagina(p).then(function (r) {
               ativos--;
+              if (acabou) return;                                   // carga j\u00e1 encerrada: descarta
+              if (mudou()) { LC.cancelar = true; return fim(''); }   // filtro mudou: troca em sil\u00eancio
               if (!r.n || !r.mais) { if (p >= ultima || !r.n) parar = true; }
               var tAgora = totalZeev();
               if (tAgora && itens.length > tAgora + rpp) {          // est\u00e1 lendo outra lista
@@ -2013,7 +2019,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
               if (itens.length >= CFG.lista.maxItens) parar = true;
               progresso();
               disparar();
-            }).catch(function (e) { ativos--; parar = true; fim('n\u00e3o foi poss\u00edvel carregar a lista completa (' + (e && e.message) + ')'); });
+            }).catch(function (e) { ativos--; if (acabou) return; parar = true; fim('n\u00e3o foi poss\u00edvel carregar a lista completa (' + (e && e.message) + ')'); });
           })(prox++);
         }
         if (prox > ultima && !ativos) {
@@ -2052,6 +2058,92 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     setInterval(checar, 30000);
     document.addEventListener('visibilitychange', checar);
     return checar;
+  }
+
+  // \u2550\u2550\u2550 C\u00d3PIA LOCAL DA LISTA (abre na hora ao voltar para a tela) \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+  // A lista carregada \u00e9 guardada no IndexedDB do navegador CRIPTOGRAFADA (AES-GCM 256). A chave
+  // fica s\u00f3 no sessionStorage desta aba: fechou a aba, a c\u00f3pia fica ileg\u00edvel e \u00e9 apagada na pr\u00f3xima
+  // abertura. Validade: CFG.lista.cacheHoras. Sem WebCrypto/IndexedDB, simplesmente n\u00e3o usa c\u00f3pia.
+  var CACHE = { db: null, chave: null, ok: !!(window.crypto && crypto.subtle && window.indexedDB) };
+  function b64(buf) { var s2 = '', a = new Uint8Array(buf); for (var i = 0; i < a.length; i++) s2 += String.fromCharCode(a[i]); return btoa(s2); }
+  function deB64(t) { return Uint8Array.from(atob(t), function (c) { return c.charCodeAt(0); }); }
+  function abrirCache() {
+    if (!CACHE.ok) return Promise.reject(new Error('sem suporte'));
+    if (CACHE.pronto) return CACHE.pronto;
+    var novaAba = !sessionStorage.getItem('lcbkCk');
+    CACHE.pronto = new Promise(function (ok, erro) {
+      var req = indexedDB.open('lcbkCache', 1);
+      req.onupgradeneeded = function () { req.result.createObjectStore('listas', { keyPath: 'k' }); };
+      req.onerror = function () { erro(req.error); };
+      req.onsuccess = function () { ok(req.result); };
+    }).then(function (db) {
+      CACHE.db = db;
+      if (novaAba) {                                          // chave nova: o que havia n\u00e3o serve mais
+        return new Promise(function (ok) {
+          var tx = db.transaction('listas', 'readwrite'); tx.objectStore('listas').clear();
+          tx.oncomplete = ok; tx.onerror = ok;
+        }).then(function () {
+          return crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+        }).then(function (k) {
+          CACHE.chave = k;
+          return crypto.subtle.exportKey('raw', k).then(function (raw) { sessionStorage.setItem('lcbkCk', b64(raw)); return db; });
+        });
+      }
+      return crypto.subtle.importKey('raw', deB64(sessionStorage.getItem('lcbkCk')), 'AES-GCM', false, ['encrypt', 'decrypt'])
+        .then(function (k) { CACHE.chave = k; return db; });
+    });
+    return CACHE.pronto;
+  }
+  function idCache(base) {
+    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(base)).then(function (h) { return b64(h); });
+  }
+  function salvarCache() {
+    if (!CACHE.ok || !LC.completo) return;
+    var base = LC.completo.base;
+    var pacote = {
+      itens: LC.completo.itens.map(function (it) { var c = {}; for (var k in it) if (k !== 'tr') c[k] = it[k]; return c; }),
+      em: LC.completo.em, total: LC.completo.total,
+      form: FORM.base === base ? { porSol: FORM.porSol, em: FORM.em } : null,
+      perda: PERDA.porSol ? { porSol: PERDA.porSol, em: PERDA.em } : null
+    };
+    abrirCache().then(function (db) {
+      var iv = crypto.getRandomValues(new Uint8Array(12));
+      return Promise.all([idCache(base), crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, CACHE.chave,
+        new TextEncoder().encode(JSON.stringify(pacote)))]).then(function (r) {
+        var tx = db.transaction('listas', 'readwrite');
+        tx.objectStore('listas').put({ k: r[0], iv: iv, dados: r[1], em: Date.now() });
+      });
+    }).catch(function () { /* sem c\u00f3pia local: segue normal */ });
+  }
+  var RE_DATA_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+  function restaurarCache(base) {
+    if (!CACHE.ok || CACHE.restaurando === base) return;
+    CACHE.restaurando = base;
+    abrirCache().then(function (db) {
+      return idCache(base).then(function (id) {
+        return new Promise(function (ok) {
+          var req = db.transaction('listas').objectStore('listas').get(id);
+          req.onsuccess = function () { ok(req.result); }; req.onerror = function () { ok(null); };
+        });
+      }).then(function (reg) {
+        if (!reg || Date.now() - reg.em > CFG.lista.cacheHoras * 3600000) return null;
+        return crypto.subtle.decrypt({ name: 'AES-GCM', iv: reg.iv }, CACHE.chave, reg.dados).then(function (buf) {
+          return JSON.parse(new TextDecoder().decode(buf), function (k, v) { return typeof v === 'string' && RE_DATA_ISO.test(v) ? new Date(v) : v; });
+        });
+      });
+    }).then(function (p2) {
+      if (!p2 || LC.completo || LC.base !== base) return;
+      var agora = new Date();
+      p2.itens.forEach(function (it) {                        // atraso recalculado para agora
+        if (it.ativo && it.due && it.due.date) it.late = it.due.date < agora;
+      });
+      LC.completo = { base: base, itens: p2.itens, em: new Date(p2.em), total: p2.total, daCopia: true };
+      if (p2.form && !FORM.em) { FORM.porSol = p2.form.porSol; FORM.em = new Date(p2.form.em); FORM.base = base; }
+      if (p2.perda && !PERDA.porSol) { PERDA.porSol = p2.perda.porSol; PERDA.em = new Date(p2.perda.em); }
+      renderInst();
+      setTimeout(function () { if (!LC.carregando) carregarTudo(); }, 300);   // atualiza em segundo plano
+    }).catch(function () { /* c\u00f3pia ileg\u00edvel ou ausente: carga normal */ })
+      .then(function () { if (CACHE.restaurando === base) CACHE.restaurando = null; });
   }
 
   function itensDaLista() {
@@ -2363,7 +2455,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         if (n >= CFG.producao.limiteLinhas) FORM.incompleto++;
       }).then(prox);
     }
-    prox().then(function () { FORM.porSol = por; FORM.em = new Date(); FORM.base = base; })
+    prox().then(function () { FORM.porSol = por; FORM.em = new Date(); FORM.base = base; setTimeout(salvarCache, 0); })
       .catch(function (e) { FORM.erro = (e && e.message) || 'erro'; })
       .then(function () { FORM.carregando = false; if (uiI.board) renderInst(); });
   }
@@ -2401,6 +2493,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         por[sol] = CFG.producao.perdaJuridico.some(function (c) { return cods[sol][c]; }) ? 'juridico' : 'cliente';
       });
       PERDA.porSol = por; PERDA.em = new Date();
+      setTimeout(salvarCache, 0);
     }).catch(function (e) {
       PERDA.erro = (e && e.message) || 'erro';
     }).then(function () {
@@ -3029,6 +3122,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       (buscando ? ' | busca: ' + achados + ' encontrado(s)' + (LB.carregando ? ', procurando no Zeev\u2026' : '') : '') +
       (layoutId === 'comercial' ? (FORM.carregando ? ' | lendo valores das negocia\u00e7\u00f5es\u2026' : FORM.erro ? ' | valores indispon\u00edveis (' + FORM.erro + ')' :
         FORM.incompleto ? ' | valores: export cortado em 1.000 linhas' : '') : '') +
+      (LC.completo && LC.completo.daCopia && LC.carregando ? ' | c\u00f3pia salva, atualizando\u2026' : '') +
       (stInst.comigo ? ' | s\u00f3 comigo' + (MEU.erro ? ' (n\u00e3o foi poss\u00edvel ler suas tarefas)' : '') : '') + ' | Kanban ' + VERSAO +
       (ocultos ? ' | ' + ocultos + ' oculto(s) pela busca' : '');
     document.documentElement.classList.toggle('lcbk-on', stInst.view === 'kanban');
