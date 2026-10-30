@@ -1727,7 +1727,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         }
         if (!it.ativo) {
           if (!perdida(it)) return 'fechados';
-          if (!PERDA.porSol && !PERDA.carregando && !PERDA.erro) setTimeout(carregarMotivosPerda, 0);
+          if (!PERDA.porSol && !PERDA.carregando && !PERDA.erro && listaPronta()) setTimeout(carregarMotivosPerda, 0);
           var mot = PERDA.porSol && PERDA.porSol[it.num];
           var idade = PERDA.em ? Date.now() - PERDA.em.getTime() : 0;
           if (!PERDA.carregando && PERDA.em && (idade > 30 * 60000 || (!mot && idade > 5 * 60000))) setTimeout(carregarMotivosPerda, 0);
@@ -1759,7 +1759,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         if (it.tipo === 'filho' && !it.ativo && !perdida(it)) return 'pos';
         if (!it.ativo) {
           if (it.tipo !== 'filho' || !perdida(it)) return 'outros';
-          if (!PERDA.porSol && !PERDA.carregando && !PERDA.erro) setTimeout(carregarMotivosPerda, 0);
+          if (!PERDA.porSol && !PERDA.carregando && !PERDA.erro && listaPronta()) setTimeout(carregarMotivosPerda, 0);
           return PERDA.porSol && PERDA.porSol[it.num] === 'juridico' ? 'rejJur' : 'outros';
         }
         return colunaDe(id, it);
@@ -1955,6 +1955,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   //  jur\u00eddica = negocia\u00e7\u00f5es (Filhos), todas as situa\u00e7\u00f5es;
   //  comercial = Filhos + Pai, Carteira e Relacionamento EM ANDAMENTO (para o PPP).
   function modoNecessario() {
+    if (LC.completo && LC.completo.daCopia && !totalZeev()) return LC.completo.funil || '';   // p\u00e1gina ainda sem total
     var lay = layoutInstAtivo();
     if ((lay !== 'comercial' && lay !== 'juridico') || !LC.url) return '';
     if (new URL(LC.url).searchParams.get('codFlowsOrServices')) return '';
@@ -1965,6 +1966,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (!precisa) return !tem;
     return !tem || tem === precisa || (precisa === 'juridico' && tem === 'comercial');
   }
+  // valores e motivos s\u00f3 depois da lista: o Zeev atende uma consulta por vez por sess\u00e3o
+  function listaPronta() { return !LC.carregando && (completoServe() || !!LC.erro); }
   function completoServe() {
     return !!(LC.completo && LC.completo.base === LC.base && serve(LC.completo.funil || '', modoNecessario()));
   }
@@ -2210,6 +2213,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function salvarCache() {
     if (!CACHE.ok || !LC.completo) return;
     var base = LC.completo.base, chaveC = base + '|' + (LC.completo.funil || '');
+    try { sessionStorage.setItem('lcbkUlt:' + location.pathname, JSON.stringify({ base: base, funil: LC.completo.funil || '' })); } catch (e) { /* ignora */ }
     var pacote = {
       itens: LC.completo.itens.map(function (it) { var c = {}; for (var k in it) if (k !== 'tr') c[k] = it[k]; return c; }),
       funil: LC.completo.funil || '',
@@ -2227,10 +2231,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     }).catch(function () { /* sem c\u00f3pia local: segue normal */ });
   }
   var RE_DATA_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
-  function restaurarCache(base) {
+  function restaurarCache(base, funilSalvo) {
     if (!CACHE.ok || CACHE.restaurando === base) return;
     CACHE.restaurando = base;
-    var precisa = modoNecessario();
+    var precisa = funilSalvo != null ? funilSalvo : modoNecessario();
     var chaves = precisa === 'juridico' ? ['juridico', 'comercial'] : [precisa];
     abrirCache().then(function (db) {
       var tentar = function (ix) {
@@ -2457,8 +2461,16 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     });
   }
   // divide o per\u00edodo da solicita\u00e7\u00e3o at\u00e9 cada parte vir abaixo do corte de 1.000 linhas
+  // O Zeev atende uma consulta por vez: exports pesados esperam a carga da lista terminar.
+  function esperarLista() {
+    return new Promise(function (ok) {
+      (function v() { if (!LC.carregando) ok(); else setTimeout(v, 300); })();
+    });
+  }
   function baixarRecorte(fluxo, flowStatus, ini, fim, extra, acc, est) {
-    return baixarLog(fluxo, flowStatus, ini, fim, extra, est).then(function (res) {
+    return (est === PROD ? Promise.resolve() : esperarLista()).then(function () {
+      return baixarLog(fluxo, flowStatus, ini, fim, extra, est);
+    }).then(function (res) {
       if (res.n >= CFG.producao.limiteLinhas) {
         var dias = Math.round((fim - ini) / DIA);
         if (dias < 1) { (est || PROD).incompleto++; res.itens.forEach(function (x) { acc.push(x); }); return; }
@@ -2595,7 +2607,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       u.pathname = u.pathname.replace(/\/instances\/?$/, '/instances/export/requests/csvsemicolon');
       ['pagenumber', 'recordsperpage', 'keyword'].forEach(function (k) { u.searchParams.delete(k); });
       u.searchParams.set('codFlowsOrServices', f[0] + ';' + f[1] + ';0;0');
-      return getJson(nossa(u.href)).then(function (j) {
+      return esperarLista().then(function () { return getJson(nossa(u.href)); }).then(function (j) {
         var n = lerFormCsv(decodificar(j && j.success && j.success.fileContent), por);
         if (n >= CFG.producao.limiteLinhas) FORM.incompleto++;
       }).then(prox);
@@ -2625,10 +2637,19 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var base = lerData(CFG.producao.inicioBase) || new Date(2020, 0, 1);
     var acc = [];
     var filhos = CFG.producao.fluxos.filter(function (f) { return f[2] === 'filho'; });
+    var maisAntiga = null;
+    (LC.completo ? LC.completo.itens : []).forEach(function (it) {
+      if (it.tipo === 'filho' && !it.ativo && perdida(it) && it.fimEm && (!maisAntiga || it.fimEm < maisAntiga)) maisAntiga = it.fimEm;
+    });
+    var extraP = '';
+    if (maisAntiga) {
+      var d0 = new Date(maisAntiga.getFullYear(), maisAntiga.getMonth(), maisAntiga.getDate());
+      extraP = '&endBegin=' + encodeURIComponent(ddmmaaaa(d0)) + '&endEnd=' + encodeURIComponent(ddmmaaaa(hoje));
+    }
     var i = 0;
     function prox() {
       if (i >= filhos.length) return Promise.resolve();
-      return baixarRecorte(filhos[i++], 'N', base, hoje, '', acc, PERDA).then(prox);
+      return baixarRecorte(filhos[i++], 'N', base, hoje, extraP, acc, PERDA).then(prox);
     }
     prox().then(function () {
       var cods = {};
@@ -3019,7 +3040,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var buscando = !!stInst.busca;
     if ((layoutId === 'comercial' || layoutId === 'juridico') && lidos.some(function (it) { return it.tipo === 'filho'; })) {
       var velhoF = !FORM.em || FORM.base !== LC.base || Date.now() - FORM.em.getTime() > 10 * 60000;
-      if (velhoF && !FORM.carregando && !(FORM.erro && FORM.base === LC.base)) setTimeout(carregarFormularios, 0);
+      if (velhoF && !FORM.carregando && listaPronta() && !(FORM.erro && FORM.base === LC.base)) setTimeout(carregarFormularios, 0);
       lidos.forEach(enriquecer);
     }
     if (buscando && LB.q === stInst.busca && LB.itens.length) {       // junta o que o Zeev achou
@@ -3228,11 +3249,15 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
 
     var total = totalZeev();
     var parcial = total && total > lidos.length && !(completo && !LC.completo.limitado);
-    var vazia = L.esteira && !todos.length && foraDaArea;
+    var vazia = L.esteira && !todos.length && foraDaArea && !foraDoTime;
+    var soTime = !todos.length && foraDoTime && stInst.time;
     // esteira comercial numa lista sem nenhuma negocia\u00e7\u00e3o (Filho): explica onde est\u00e1 o funil
     var semNeg = layoutId === 'comercial' && !buscando && lidos.length >= 30 &&
       !lidos.some(function (it) { return it.tipo === 'filho'; });
-    uiI.aviso.textContent = semNeg
+    uiI.aviso.textContent = soTime
+      ? 'O filtro "Time: ' + (NOMES_TIME[stInst.time] || stInst.time) + '" est\u00e1 escondendo os ' + fmtN(foraDoTime) +
+        ' processos desta esteira. Troque para "Time: todos".'
+      : semNeg
       ? 'Esta lista n\u00e3o tem nenhuma negocia\u00e7\u00e3o (fluxos Filho): por isso Fechado comercialmente, Fechados e Perdidas aparecem zerados. ' +
         (EH_GESTOR || CFG.pathGestor.test(location.pathname)
           ? 'Confira o filtro do Zeev: ele pode estar limitando a lista a um fluxo s\u00f3.'
@@ -3247,7 +3272,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         ' (limite de ' + fmtN(CFG.lista.maxItens) + ' para n\u00e3o pesar no Zeev). Filtre a lista para ter os n\u00fameros completos.';
     }
     if (LC.erro) uiI.aviso.textContent = 'Lista completa: ' + LC.erro + '. Mostrando s\u00f3 a p\u00e1gina atual.';
-    uiI.aviso.style.display = (semNeg || vazia || (parcial && !colTotal) || LC.erro || (completo && LC.completo.limitado)) &&
+    uiI.aviso.style.display = (soTime || semNeg || vazia || (parcial && !colTotal) || LC.erro || (completo && LC.completo.limitado)) &&
       stInst.view === 'kanban' ? '' : 'none';
     // bot\u00e3o de carregar tudo
     var falta = !completo && total && total > lidos.length && LC.url;
@@ -3314,6 +3339,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     uiI.layout.addEventListener('change', function () {
       stInst.layout = uiI.layout.value;
       stInst.etapa = '';
+      stInst.time = ''; ls('lcbKanbanTime', '');
       ls(CFG.keys.layoutInst, stInst.layout);
       renderInst();
     });
@@ -3557,7 +3583,15 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     }, CFG.producao.atualizarMin * 60000);
   }
 
+  function abrirUltimaCopia() {
+    var ult = null;
+    try { ult = JSON.parse(sessionStorage.getItem('lcbkUlt:' + location.pathname) || 'null'); } catch (e) { /* ignora */ }
+    if (!ult || !ult.base || LC.url) return;
+    LC.url = ult.base; LC.base = ult.base;
+    restaurarCache(ult.base, ult.funil);
+  }
   function bootInst(tries) {
+    if (tries === 0) abrirUltimaCopia();
     if (tries === 0) vigiarAtualizacao();
     if (tries === 0) iniciarProducao();
     if (tries === 0) vigiarConsultas();
