@@ -868,10 +868,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       pr.title = 'Processo ' + info.procNum;
       c.appendChild(pr);
     }
-    var aceita = ['fecCom', 'cessao', 'fechados'].indexOf(colId) !== -1;
+    var aceita = ['fecCom', 'cessao', 'fechados', 'pos'].indexOf(colId) !== -1;
 
     var perdidaCol = /^perd|^rejJur/.test(colId || '');
-    var rotProp = colId === 'fechados' ? 'Valor pago' : aceita ? 'Proposta aceita' : perdidaCol ? '\u00daltima proposta' : 'Proposta vigente';
+    var rotProp = colId === 'fechados' || colId === 'pos' ? 'Valor pago' : aceita ? 'Proposta aceita' : perdidaCol ? '\u00daltima proposta' : 'Proposta vigente';
     if (info.face) linhas.push([info.faceRot ? 'Valor de face (honor\u00e1rios)' : 'Valor de face', info.face, '', 'is-face']);
     if (info.proposta) linhas.push([rotProp, info.proposta, '', 'is-valor']);
     else if (info.semProposta) linhas.push([rotProp, 'sem proposta', '', 'is-vazio']);
@@ -1743,12 +1743,18 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       nome: CFG.esteiras[id].nome,
       esteira: id,
       cols: function () {
-        return colunasEsteira(id).map(function (c) { c.precisaB = false; if (c.id === 'pos') { c.name = 'Pagos'; c.ok = true; } return c; })
+        return colunasEsteira(id).map(function (c) {
+          c.precisaB = false;
+          if (c.id === 'pos') { c.name = 'Pagos'; c.ok = true; c.encerrada = true; c.dica = 'passou da T24 ou conclu\u00edda'; }
+          return c;
+        })
           .concat([{ id: 'rejJur', name: 'Rejeitadas pelo Jur\u00eddico', alert: true, encerrada: true,
                      dica: PERDA.carregando ? 'lendo o hist\u00f3rico das negocia\u00e7\u00f5es\u2026' : 'passou pela reprova\u00e7\u00e3o (T11, T15 ou T16)' },
                    { id: 'outros', name: 'Outras \u00e1reas', opcional: true, outras: true }]);
       },
       place: function (it) {
+        // mesma regra do comercial: Pagos = passou da T24 (p\u00f3s-cess\u00e3o) ou negocia\u00e7\u00e3o conclu\u00edda sem perda
+        if (it.tipo === 'filho' && !it.ativo && !perdida(it)) return 'pos';
         if (!it.ativo) {
           if (it.tipo !== 'filho' || !perdida(it)) return 'outros';
           if (!PERDA.porSol && !PERDA.carregando && !PERDA.erro) setTimeout(carregarMotivosPerda, 0);
