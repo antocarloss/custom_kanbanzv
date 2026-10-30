@@ -1717,7 +1717,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
                    { id: 'perdJur', name: 'Perdidas \u00b7 rejeitada pelo jur\u00eddico', alert: true, dica: 'passou pela reprova\u00e7\u00e3o (T11, T15 ou T16)', encerrada: true },
                    { id: 'perdCli', name: 'Perdidas \u00b7 rejeitada pelo cliente', alert: true, dica: 'cancelada ou recusada pelo cliente', encerrada: true },
                    { id: 'perdNI', name: 'Perdidas \u00b7 motivo n\u00e3o identificado', alert: true, opcional: true, encerrada: true,
-                     dica: PERDA.carregando ? 'lendo o hist\u00f3rico das negocia\u00e7\u00f5es\u2026' : 'hist\u00f3rico n\u00e3o dispon\u00edvel' },
+                     dica: PERDA.carregando || (!PERDA.porSol && !PERDA.erro) ? 'lendo o hist\u00f3rico das negocia\u00e7\u00f5es\u2026' : 'hist\u00f3rico n\u00e3o dispon\u00edvel' },
                    { id: 'outros', name: 'Outras \u00e1reas', opcional: true, outras: true }]);
       },
       place: function (it) {
@@ -1994,8 +1994,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       .catch(function () { return 0; });
   }
 
-  function carregarTudo() {
+  function carregarTudo(tent) {
     if (LC.carregando || !LC.url) return;
+    if (!totalZeev() && (tent || 0) < 20) { setTimeout(function () { carregarTudo((tent || 0) + 1); }, 500); return; }
     var modo = modoNecessario();
     if (modo) return carregarFunil(modo);
     var u0 = new URL(LC.url);
@@ -2037,7 +2038,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var agora = Date.now();
       if (agora - tRender > 400) { tRender = agora; renderInst(); }
     }
-    function mudou() { return LC.cancelar || base !== LC.base; }
+    function mudou() { return LC.cancelar || base !== LC.base || !!modoNecessario(); }
     progresso();
     // 1\u00aa p\u00e1gina: descobre o tamanho real da p\u00e1gina; depois as outras v\u00e3o em paralelo
     pagina(1).then(function (r1) {
@@ -3292,7 +3293,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       (foraDaArea ? ' | ' + foraDaArea + ' em outras \u00e1reas' : '') +
       (foraDoTime ? ' | ' + foraDoTime + ' de outros times' : '') +
       (buscando ? ' | busca: ' + achados + ' encontrado(s)' + (LB.carregando ? ', procurando no Zeev\u2026' : '') : '') +
-      (layoutId === 'comercial' ? (FORM.carregando ? ' | lendo valores das negocia\u00e7\u00f5es\u2026' : FORM.erro ? ' | valores indispon\u00edveis (' + FORM.erro + ')' :
+      (layoutId === 'comercial' || layoutId === 'juridico' ? (FORM.carregando ? ' | lendo valores das negocia\u00e7\u00f5es\u2026' :
+        !FORM.em && LC.carregando ? ' | valores e motivos entram quando a lista terminar' : FORM.erro ? ' | valores indispon\u00edveis (' + FORM.erro + ')' :
         FORM.incompleto ? ' | valores: export cortado em 1.000 linhas' : '') : '') +
       (LC.completo && LC.completo.daCopia && LC.carregando ? ' | c\u00f3pia salva, atualizando\u2026' : '') +
       (stInst.comigo ? ' | s\u00f3 comigo' + (MEU.erro ? ' (n\u00e3o foi poss\u00edvel ler suas tarefas)' : '') : '') + ' | Kanban ' + VERSAO +
