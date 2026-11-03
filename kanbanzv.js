@@ -1958,6 +1958,42 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       tipo: tipo, stage: cl.etapa, area: cl.area
     };
   }
+  // \u2550\u2550\u2550 FILTRO DE PER\u00cdODO \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+  // Aplicado na CONSULTA ao Zeev (n\u00e3o na tela): carrega s\u00f3 o per\u00edodo escolhido, por isso \u00e9 r\u00e1pido.
+  //  "Abertas em" = data da solicita\u00e7\u00e3o; "Encerradas em" = data de conclus\u00e3o (s\u00f3 encerradas).
+  var PERIODOS = [
+    ['', 'Per\u00edodo: tudo'],
+    ['a-hoje', 'Abertas hoje'], ['a-ontem', 'Abertas ontem'], ['a-7', 'Abertas nos \u00faltimos 7 dias'],
+    ['a-mes', 'Abertas neste m\u00eas'], ['a-mesant', 'Abertas no m\u00eas anterior'], ['a-90', 'Abertas nos \u00faltimos 90 dias'],
+    ['e-hoje', 'Encerradas hoje'], ['e-ontem', 'Encerradas ontem'], ['e-7', 'Encerradas nos \u00faltimos 7 dias'],
+    ['e-mes', 'Encerradas neste m\u00eas'], ['e-mesant', 'Encerradas no m\u00eas anterior']
+  ];
+  function nomePeriodo(k) { for (var i = 0; i < PERIODOS.length; i++) if (PERIODOS[i][0] === k) return PERIODOS[i][1]; return ''; }
+  function intervaloPeriodo(k) {
+    if (!k) return null;
+    var h = new Date(); h.setHours(0, 0, 0, 0);
+    var dia = function (n) { return new Date(h.getTime() + n * DIA); };
+    var p = k.split('-'), ini = h, fim = h;
+    if (p[1] === 'ontem') { ini = fim = dia(-1); }
+    else if (p[1] === '7') { ini = dia(-6); }
+    else if (p[1] === '90') { ini = dia(-89); }
+    else if (p[1] === 'mes') { ini = new Date(h.getFullYear(), h.getMonth(), 1); }
+    else if (p[1] === 'mesant') { ini = new Date(h.getFullYear(), h.getMonth() - 1, 1); fim = new Date(h.getFullYear(), h.getMonth(), 0); }
+    return { tipo: p[0], ini: ini, fim: fim };
+  }
+  function aplicarPeriodo(u, k) {
+    var r = intervaloPeriodo(k);
+    if (!r) return true;
+    if (r.tipo === 'a') {
+      u.searchParams.set('startBegin', ddmmaaaa(r.ini)); u.searchParams.set('startEnd', ddmmaaaa(r.fim));
+    } else {
+      if (u.searchParams.get('flowStatus') === 'S') return false;          // fonte "em andamento" n\u00e3o tem encerradas
+      u.searchParams.set('flowStatus', 'N');
+      u.searchParams.set('endBegin', ddmmaaaa(r.ini)); u.searchParams.set('endEnd', ddmmaaaa(r.fim));
+    }
+    return true;
+  }
+
   // \u2550\u2550\u2550 MODO FUNIL \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
   // Esteira comercial ou jur\u00eddica numa lista grande SEM filtro de fluxo: em vez da lista inteira,
   // o Kanban busca no Zeev s\u00f3 o que a esteira usa (mesma permiss\u00e3o e mesmos filtros da p\u00e1gina):
@@ -1968,6 +2004,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var lay = layoutInstAtivo();
     if ((lay !== 'comercial' && lay !== 'juridico') || !LC.url) return '';
     if (new URL(LC.url).searchParams.get('codFlowsOrServices')) return '';
+    if (stInst.periodo) return lay;
     var t = totalZeev();
     return t && t > CFG.lista.funilAcima ? lay : '';
   }
@@ -1978,7 +2015,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   // valores e motivos s\u00f3 depois da lista: o Zeev atende uma consulta por vez por sess\u00e3o
   function listaPronta() { return !LC.carregando && (completoServe() || !!LC.erro); }
   function completoServe() {
-    return !!(LC.completo && LC.completo.base === LC.base && serve(LC.completo.funil || '', modoNecessario()));
+    return !!(LC.completo && LC.completo.base === LC.base && (LC.completo.periodo || '') === (stInst.periodo || '') &&
+      serve(LC.completo.funil || '', modoNecessario()));
   }
   function fontesFunil(modo, u0) {
     var F = CFG.producao.fluxos, fontes = [];
@@ -2007,7 +2045,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (LC.carregando || !LC.url) return;
     if (!totalZeev() && (tent || 0) < 20) { setTimeout(function () { carregarTudo((tent || 0) + 1); }, 500); return; }
     var modo = modoNecessario();
-    if (modo) return carregarFunil(modo);
+    if (modo || stInst.periodo) return carregarFunil(modo);
     var u0 = new URL(LC.url);
     var base = baseDe(u0.href);
     var total = totalZeev();
@@ -2090,23 +2128,27 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     }).catch(function (e) { fim('n\u00e3o foi poss\u00edvel carregar a lista completa (' + (e && e.message) + ')'); });
   }
   function carregarFunil(modo) {
-    var u0 = new URL(LC.url), base = baseDe(u0.href);
-    var fontes = fontesFunil(modo, u0), itens = [], vistos = {}, acabou = false, total = 0;
+    var u0 = new URL(LC.url), base = baseDe(u0.href), per = stInst.periodo || '';
+    var fontes = (modo ? fontesFunil(modo, u0) : [u0.href]).map(function (h) {
+      var u = new URL(h); return aplicarPeriodo(u, per) ? u.href : null;
+    }).filter(Boolean);
+    var itens = [], vistos = {}, acabou = false, total = 0;
     LC.carregando = true; LC.cancelar = false; LC.erro = ''; LC.base = base; LC.parcial = itens;
     var tRender = 0;
     function progresso() {
-      LC.prog = 'Carregando o funil ' + (modo === 'comercial' ? 'comercial' : 'jur\u00eddico') + ': ' + fmtN(itens.length) + (total ? ' de ' + fmtN(total) : '') + '\u2026';
+      LC.prog = 'Carregando ' + (modo ? 'o funil ' + (modo === 'comercial' ? 'comercial' : 'jur\u00eddico') : '') +
+        (per ? ' (' + nomePeriodo(per).toLowerCase() + ')' : '') + ': ' + fmtN(itens.length) + (total ? ' de ' + fmtN(total) : '') + '\u2026';
       if (Date.now() - tRender > 400) { tRender = Date.now(); renderInst(); }
     }
-    function mudou() { return LC.cancelar || base !== LC.base || !serve(modo, modoNecessario()); }
+    function mudou() { return LC.cancelar || base !== LC.base || per !== (stInst.periodo || '') || !serve(modo, modoNecessario()); }
     function fim(msg) {
       if (acabou) return;
       acabou = true;
       LC.carregando = false; LC.prog = ''; LC.parcial = null;
-      var trocou = LC.cancelar || base !== LC.base || !serve(modo, modoNecessario());
+      var trocou = LC.cancelar || base !== LC.base || per !== (stInst.periodo || '') || !serve(modo, modoNecessario());
       if (msg) { LC.erro = msg; LC.completo = null; }
       else if (!trocou) {
-        LC.completo = { base: base, itens: itens, em: new Date(), total: itens.length, funil: modo };
+        LC.completo = { base: base, itens: itens, em: new Date(), total: itens.length, funil: modo, periodo: per };
         setTimeout(salvarCache, 0);
       }
       if (trocou) setTimeout(agendarAuto, 50);
@@ -2222,7 +2264,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   function salvarCache() {
     if (!CACHE.ok || !LC.completo) return;
-    var base = LC.completo.base, chaveC = base + '|' + (LC.completo.funil || '');
+    var base = LC.completo.base, chaveC = base + '|' + (LC.completo.funil || '') + (LC.completo.periodo ? '|' + LC.completo.periodo : '');
     try { sessionStorage.setItem('lcbkUlt:' + location.pathname, JSON.stringify({ base: base, funil: LC.completo.funil || '' })); } catch (e) { /* ignora */ }
     var pacote = {
       itens: LC.completo.itens.map(function (it) { var c = {}; for (var k in it) if (k !== 'tr') c[k] = it[k]; return c; }),
@@ -2249,14 +2291,14 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     abrirCache().then(function (db) {
       var tentar = function (ix) {
         if (ix >= chaves.length) return Promise.resolve(null);
-        return lerReg(db, base + '|' + chaves[ix]).then(function (r) { return r || tentar(ix + 1); });
+        return lerReg(db, base + '|' + chaves[ix] + (stInst.periodo ? '|' + stInst.periodo : '')).then(function (r) { return r || tentar(ix + 1); });
       };
       return tentar(0);
     }).then(function (p2) {
       if (!p2 || LC.completo || LC.base !== base) return;
       var agora = new Date();
       p2.itens.forEach(function (it) { if (it.ativo && it.due && it.due.date) it.late = it.due.date < agora; });
-      LC.completo = { base: base, itens: p2.itens, em: new Date(p2.em), total: p2.total, daCopia: true, funil: p2.funil || '' };
+      LC.completo = { base: base, itens: p2.itens, em: new Date(p2.em), total: p2.total, daCopia: true, funil: p2.funil || '', periodo: stInst.periodo || '' };
       if (p2.form && !FORM.em) { FORM.porSol = p2.form.porSol; FORM.em = new Date(p2.form.em); FORM.base = base; }
       if (p2.perda && !PERDA.porSol) { PERDA.porSol = p2.perda.porSol; PERDA.em = new Date(p2.perda.em); }
       renderInst();
@@ -2398,6 +2440,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     outras: ls('lcbKanbanOutras') === '1',
     ator: '',
     etapa: '',
+    periodo: ls('lcbKanbanPeriodo') || '',
     comigo: false,
     lim: {},
     painel: ls('lcbKanbanPainel') !== '0',
@@ -3297,7 +3340,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (LC.carregando) uiI.btnTudo.textContent = LC.prog + ' Cancelar';
     uiI.btnAtual.style.display = completo && !LC.carregando && stInst.view === 'kanban' ? '' : 'none';
     var origem = completo
-      ? (LC.completo.funil ? 'Funil ' + (LC.completo.funil === 'comercial' ? 'comercial' : 'jur\u00eddico') + ': ' + fmtN(lidos.length) + ' carregadas (s\u00f3 o que a esteira usa)'
+      ? (LC.completo.periodo ? nomePeriodo(LC.completo.periodo) + ': ' + fmtN(lidos.length) + ' carregadas' +
+           (LC.completo.funil ? ' (funil ' + (LC.completo.funil === 'comercial' ? 'comercial' : 'jur\u00eddico') + ')' : '')
+         : LC.completo.funil ? 'Funil ' + (LC.completo.funil === 'comercial' ? 'comercial' : 'jur\u00eddico') + ': ' + fmtN(lidos.length) + ' carregadas (s\u00f3 o que a esteira usa)'
          : LC.completo.limitado ? fmtN(lidos.length) + ' de ' + fmtN(total) + ' carregados'
                               : 'Todas as ' + fmtN(lidos.length) + ' carregadas') +
         ' \u00e0s ' + LC.completo.em.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
@@ -3364,6 +3409,18 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     uiI.fEtapa.setAttribute('aria-label', 'Mostrar s\u00f3 uma etapa');
     uiI.fEtapa.addEventListener('change', function () { stInst.etapa = uiI.fEtapa.value; renderInst(); });
     uiI.tools.appendChild(uiI.fEtapa);
+    uiI.fPeriodo = el('select', 'lcbk-select');
+    uiI.fPeriodo.setAttribute('aria-label', 'Per\u00edodo');
+    PERIODOS.forEach(function (o) { var op = el('option', null, o[1]); op.value = o[0]; uiI.fPeriodo.appendChild(op); });
+    uiI.fPeriodo.value = stInst.periodo;
+    uiI.fPeriodo.addEventListener('change', function () {
+      stInst.periodo = uiI.fPeriodo.value;
+      ls('lcbKanbanPeriodo', stInst.periodo);
+      if (LC.carregando) LC.cancelar = true;                    // a carga atual para e recome\u00e7a com o per\u00edodo
+      else setTimeout(function () { carregarTudo(); }, 0);
+      renderInst();
+    });
+    uiI.tools.appendChild(uiI.fPeriodo);
     uiI.fAtor = el('select', 'lcbk-select');
     uiI.fAtor.setAttribute('aria-label', 'Filtrar por quem est\u00e1 com a atividade');
     uiI.fAtor.addEventListener('change', function () { stInst.ator = uiI.fAtor.value; renderInst(); });
