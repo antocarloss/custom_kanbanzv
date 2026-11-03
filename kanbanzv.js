@@ -70,7 +70,7 @@
       // Propostas: da mais recente para a mais antiga (a 1\u00aa preenchida \u00e9 a vigente).
       form: {
         // Valor de face = "Valor Total do Cr\u00e9dito Principal" (vTCP). vTA/vTHC s\u00f3 se o vTCP estiver vazio.
-        face: ['vTCP', 'vTA', 'vTHC'],
+        face: ['vTCP', 'vTA', 'vTHC', 'valorEstimadoDoProcesso'],
         propostas: [['vPAutorCorrigida', 'corrigida'], ['vPAdvCCorrigida', 'corrigida'], ['vPAdvogadoContratualCorrigida', 'corrigida'],
                     ['vPDFParaAutor', 'diretor financeiro'], ['vPDFParaAdvogado', 'diretor financeiro'], ['vPDFParaAdvogadoContratual', 'diretor financeiro'],
                     ['vSPAutor', '2\u00aa proposta'], ['vSPAdvogadoContratual', '2\u00aa proposta'],
@@ -2728,6 +2728,50 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       .catch(function (e) { FORM.erro = (e && e.message) || 'erro'; })
       .then(function () { FORM.carregando = false; if (uiI.board) renderInst(); });
   }
+  var FORMP = { em: null, chave: '', carregando: false, erro: '' };
+  function lerFormPai(fluxo, q, ini, fim, por, prof) {
+    var u = new URL(LC.base || baseDe(LC.url));
+    u.pathname = u.pathname.replace(/\/instances\/?$/, '/instances/export/requests/csvsemicolon');
+    ['pagenumber', 'recordsperpage', 'keyword', 'flowStatus', 'startBegin', 'startEnd', 'endBegin', 'endEnd'].forEach(function (k) { u.searchParams.delete(k); });
+    u.searchParams.set('codFlowsOrServices', fluxo[0] + ';' + fluxo[1] + ';0;0');
+    if (q.flowStatus) u.searchParams.set('flowStatus', q.flowStatus);
+    u.searchParams.set('startBegin', ddmmaaaa(ini)); u.searchParams.set('startEnd', ddmmaaaa(fim));
+    return esperarLista().then(function () { return getJson(nossa(u.href)); }).then(function (j) {
+      var tmp = {}, n = lerFormCsv(decodificar(j && j.success && j.success.fileContent), tmp);
+      var dias = Math.round((fim - ini) / DIA);
+      if (n >= CFG.producao.limiteLinhas && dias >= 1 && (prof || 0) < 12) {   // corte do Zeev: divide o per\u00edodo
+        var meio = new Date(ini.getTime() + Math.floor(dias / 2) * DIA), depois = new Date(meio.getTime() + DIA);
+        return lerFormPai(fluxo, q, ini, meio, por, (prof || 0) + 1).then(function () { return lerFormPai(fluxo, q, depois, fim, por, (prof || 0) + 1); });
+      }
+      Object.keys(tmp).forEach(function (k) { por[k] = tmp[k]; });
+    });
+  }
+  function carregarFormPai(lay, lidos) {
+    if (FORMP.carregando) return;
+    var hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    var q = {}, ini;
+    if (lay === 'triagem') ini = inicioDoMes();                                 // triagem: abertos no m\u00eas
+    else {                                                                       // Inatividade / Relacionamento Novos
+      q.flowStatus = 'S';
+      lidos.forEach(function (it) { if (it.tipo !== 'filho' && it.ativo && it.inicioEm && (!ini || it.inicioEm < ini)) ini = it.inicioEm; });
+      if (!ini) return;
+      ini = new Date(ini.getFullYear(), ini.getMonth(), ini.getDate());
+    }
+    var chave = LC.base + '|' + lay + '|' + ddmmaaaa(ini);
+    FORMP.carregando = true; FORMP.erro = '';
+    var por = {}, fl = CFG.producao.fluxos.filter(function (f) { return f[2] === 'pai' || f[2] === 'carteira'; }), i = 0;
+    (function prox() {
+      if (i >= fl.length) {
+        Object.keys(por).forEach(function (k) { FORM.porSol[k] = por[k]; });
+        FORMP.em = new Date(); FORMP.chave = chave; FORMP.carregando = false;
+        setTimeout(salvarCache, 0);
+        return renderInst();
+      }
+      lerFormPai(fl[i++], q, ini, hoje, por).then(prox, function (e) {
+        FORMP.erro = (e && e.message) || 'erro'; FORMP.carregando = false; FORMP.chave = chave; renderInst();
+      });
+    })();
+  }
   function enriquecer(it) {
     var f = FORM.porSol[it.num];
     if (!f) return;
@@ -3153,8 +3197,14 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if ((layoutId === 'comercial' || layoutId === 'juridico') && lidos.some(function (it) { return it.tipo === 'filho'; })) {
       var velhoF = !FORM.em || FORM.base !== LC.base || Date.now() - FORM.em.getTime() > 10 * 60000;
       if (velhoF && !FORM.carregando && listaPronta() && !(FORM.erro && FORM.base === LC.base)) setTimeout(carregarFormularios, 0);
-      lidos.forEach(enriquecer);
     }
+    if ((layoutId === 'triagem' || layoutId === 'inatividade' || layoutId === 'relnovos') && listaPronta() && !FORMP.carregando &&
+        lidos.some(function (it) { return it.tipo !== 'filho'; })) {
+      var chaveP = LC.base + '|' + layoutId;
+      var velhoP = !FORMP.em || FORMP.chave.indexOf(chaveP + '|') !== 0 || Date.now() - FORMP.em.getTime() > 10 * 60000;
+      if (velhoP && !(FORMP.erro && FORMP.chave.indexOf(chaveP + '|') === 0)) setTimeout(function () { carregarFormPai(layoutId, lidos); }, 0);
+    }
+    lidos.forEach(enriquecer);
     if (buscando && LB.q === stInst.busca && LB.itens.length) {       // junta o que o Zeev achou
       var ja = {};
       lidos.forEach(function (it) { ja[it.num] = 1; });
@@ -3271,7 +3321,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       } else if (c.dica != null) {
         if (c.dica) h.appendChild(el('small', null, c.dica));
         if (somaFace) h.appendChild(el('small', 'lcbk-soma', 'Valor de Face: ' + moedaBR(somaFace)));
-        if (somaProp) h.appendChild(el('small', 'lcbk-soma is-prop', 'Valor de Desembolso: ' + moedaBR(somaProp)));
+        if (somaProp || somaFace) h.appendChild(el('small', 'lcbk-soma is-prop', 'Valor de Desembolso: ' + moedaBR(somaProp)));
       }
       head.appendChild(h);
       head.appendChild(el('span', 'lcbk-count', fmtN(n)));
@@ -3414,6 +3464,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       (foraDaArea ? ' | ' + foraDaArea + ' em outras \u00e1reas' : '') +
       (foraDoTime ? ' | ' + foraDoTime + ' de outros times' : '') +
       (buscando ? ' | busca: ' + achados + ' encontrado(s)' + (LB.carregando ? ', procurando no Zeev\u2026' : '') : '') +
+      (FORMP.carregando ? ' | lendo valores dos leads\u2026' : FORMP.erro && layoutId !== 'comercial' && layoutId !== 'juridico' ? ' | valores dos leads indispon\u00edveis (' + FORMP.erro + ')' : '') +
       (layoutId === 'comercial' || layoutId === 'juridico' ? (FORM.carregando ? ' | lendo valores das negocia\u00e7\u00f5es\u2026' :
         !FORM.em && LC.carregando ? ' | valores e motivos entram quando a lista terminar' : FORM.erro ? ' | valores indispon\u00edveis (' + FORM.erro + ')' :
         FORM.incompleto ? ' | valores: export cortado em 1.000 linhas' : '') : '') +
