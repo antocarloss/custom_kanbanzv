@@ -332,6 +332,19 @@
     } catch (e) { /* navegador sem URLSearchParams: ignora */ }
   })();
 
+  // \u2500\u2500 Ativa\u00e7\u00e3o sem link (app do Zeev para computador, sem barra de endere\u00e7o):
+  //    digitar na busca do Kanban "lcb:dashboard" (ou "lcb:dashboard off", "lcb:gestor", "lcb:gestor off") \u2500\u2500
+  function comandoAtivacao(txt) {
+    var m = String(txt || '').trim().toLowerCase().match(/^lcb:(dashboard|gestor)(\s+off)?$/);
+    if (!m) return false;
+    var chave = m[1] === 'dashboard' ? 'lcbPainel' : CFG.keys.gestor;
+    ls(chave, m[2] ? 'off' : 'on');
+    alert((m[1] === 'dashboard' ? 'Atalho do Dashboard' : 'Painel do gestor') + (m[2] ? ' desativado' : ' ativado') +
+      ' neste computador. A p\u00e1gina vai recarregar.');
+    location.reload();
+    return true;
+  }
+
   // \u2500\u2500 Atalhos no menu lateral (rodam em todas as p\u00e1ginas, independentes do Kanban) \u2500\u2500
   (function () {
     var ativos = CFG.atalhos.filter(function (a) {
@@ -1447,7 +1460,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var tb;
     ui.search.addEventListener('input', function () {
       clearTimeout(tb);
-      tb = setTimeout(function () { state.busca = clean(ui.search.value); render(); }, 150);
+      tb = setTimeout(function () {
+        if (comandoAtivacao(ui.search.value)) return;
+        state.busca = clean(ui.search.value); render();
+      }, 150);
     });
     ui.tools.appendChild(ui.search);
 
@@ -1711,7 +1727,29 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     return clean(inf.desq) || (/desqualific/i.test(inf.viab || '') ? 'Desqualificado (motivo n\u00e3o informado)' : 'Motivo n\u00e3o informado');
   }
   function slug(t) { return 'm_' + lower(t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').slice(0, 60); }
-  var REJ = { cols: [] };          // colunas do pipeline Rejeitados (montadas a partir dos motivos da lista)
+  var REJ = { cols: [] };
+  // \u2500\u2500 Triagem do m\u00eas \u00d7 Inatividade (PPP antigos) \u00d7 Relacionamento Novos (PPF antigos)
+  var MESES_NOME = ['Janeiro', 'Fevereiro', 'Mar\u00e7o', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+  function inicioDoMes() { var h = new Date(); return new Date(h.getFullYear(), h.getMonth(), 1); }
+  function doMes(it) { return !it.inicioEm || it.inicioEm >= inicioDoMes(); }      // sem data: n\u00e3o esconde
+  function mesChave(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2); }
+  function nomeMesChave(k) {
+    var p = k.split('-'), nome = MESES_NOME[+p[1] - 1];
+    return +p[0] === new Date().getFullYear() ? nome : nome + '/' + p[0];
+  }
+  function antigoNa(it, etapa) {                             // em andamento, na etapa, aberto antes deste m\u00eas
+    return it.ativo && it.tipo !== 'filho' && it.inicioEm && it.inicioEm < inicioDoMes() && colunaDe('triagem', it) === etapa;
+  }
+  var MESES = { cols: [] };
+  function layoutPorMes(nome, etapa) {
+    return {
+      nome: nome,
+      esteira: 'triagem',
+      cols: function () { return MESES.cols.concat([{ id: 'outros', name: 'Outras \u00e1reas', opcional: true, outras: true }]); },
+      place: function (it) { return antigoNa(it, etapa) ? 'mes_' + mesChave(it.inicioEm) : 'outros'; },
+      etapa: etapa
+    };
+  }          // colunas do pipeline Rejeitados (montadas a partir dos motivos da lista)
   function layoutEsteiraInst(id) {
     if (id === 'comercial') return {
       nome: CFG.esteiras[id].nome,
@@ -1779,14 +1817,15 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       esteira: id,
       cols: function () {
         return colunasEsteira(id).filter(function (c) { return c.id !== 'negociacao'; })
-          .map(function (c) { c.precisaB = false; return c; })
-          .concat([{ id: 'rejeitadas', name: 'Rejeitadas', alert: true, encerrada: true },
+          .map(function (c) { c.precisaB = false; c.dica = 'abertos neste m\u00eas'; return c; })
+          .concat([{ id: 'rejeitadas', name: 'Rejeitadas', alert: true, encerrada: true, dica: 'todos os meses' },
                    { id: 'outros', name: 'Outras \u00e1reas', opcional: true, outras: true }]);
       },
       place: function (it) {
-        if (!it.ativo) return it.tipo !== 'filho' && rejeitadoTriagem(it) ? 'rejeitadas' : 'outros';
+        if (!it.ativo) return it.tipo !== 'filho' && rejeitadoTriagem(it) ? 'rejeitadas' : 'outros';   // rejeitadas: todos os meses
         var c = colunaDe(id, it);
-        return c === 'negociacao' ? 'outros' : c;
+        if (c === 'negociacao') return 'outros';
+        return doMes(it) ? c : 'outros';                     // em andamento: s\u00f3 os abertos neste m\u00eas
       }
     };
     return {
@@ -1808,6 +1847,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     comercial: layoutEsteiraInst('comercial'),
     juridico: layoutEsteiraInst('juridico'),
     triagem: layoutEsteiraInst('triagem'),
+    inatividade: layoutPorMes('Inatividade (PPP de meses anteriores)', 'ppp'),
+    relnovos: layoutPorMes('Relacionamento Novos (PPF de meses anteriores)', 'ppf'),
     rejeitados: {
       nome: 'Rejeitados (por motivo)',
       esteira: 'rejeitados',
@@ -1968,6 +2009,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     ['e-hoje', 'Encerradas hoje'], ['e-ontem', 'Encerradas ontem'], ['e-7', 'Encerradas nos \u00faltimos 7 dias'],
     ['e-mes', 'Encerradas neste m\u00eas'], ['e-mesant', 'Encerradas no m\u00eas anterior']
   ];
+  // Inatividade e Relacionamento Novos olham todos os meses: ignoram o filtro de per\u00edodo
+  function periodoEfetivo() {
+    var lay = layoutInstAtivo();
+    return lay === 'inatividade' || lay === 'relnovos' ? '' : (stInst.periodo || '');
+  }
   function nomePeriodo(k) { for (var i = 0; i < PERIODOS.length; i++) if (PERIODOS[i][0] === k) return PERIODOS[i][1]; return ''; }
   function intervaloPeriodo(k) {
     if (!k) return null;
@@ -2002,27 +2048,34 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function modoNecessario() {
     if (LC.completo && LC.completo.daCopia && !totalZeev()) return LC.completo.funil || '';   // p\u00e1gina ainda sem total
     var lay = layoutInstAtivo();
-    if ((lay !== 'comercial' && lay !== 'juridico') || !LC.url) return '';
+    if ((lay !== 'comercial' && lay !== 'juridico' && lay !== 'inatividade' && lay !== 'relnovos') || !LC.url) return '';
     if (new URL(LC.url).searchParams.get('codFlowsOrServices')) return '';
-    if (stInst.periodo) return lay;
+    if (lay === 'inatividade' || lay === 'relnovos') {                 // s\u00f3 o Pai em andamento
+      var t0 = totalZeev();
+      return t0 && t0 > CFG.lista.funilAcima ? 'pai' : '';
+    }
+    if (periodoEfetivo()) return lay;
     var t = totalZeev();
     return t && t > CFG.lista.funilAcima ? lay : '';
   }
   function serve(tem, precisa) {                               // a carga 'tem' atende a esteira 'precisa'?
     if (!precisa) return !tem;
-    return !tem || tem === precisa || (precisa === 'juridico' && tem === 'comercial');
+    return !tem || tem === precisa || ((precisa === 'juridico' || precisa === 'pai') && tem === 'comercial');
   }
   // valores e motivos s\u00f3 depois da lista: o Zeev atende uma consulta por vez por sess\u00e3o
   function listaPronta() { return !LC.carregando && (completoServe() || !!LC.erro); }
   function completoServe() {
-    return !!(LC.completo && LC.completo.base === LC.base && (LC.completo.periodo || '') === (stInst.periodo || '') &&
+    return !!(LC.completo && LC.completo.base === LC.base && (LC.completo.periodo || '') === periodoEfetivo() &&
       serve(LC.completo.funil || '', modoNecessario()));
   }
   function fontesFunil(modo, u0) {
     var F = CFG.producao.fluxos, fontes = [];
     F.forEach(function (f) {
       var papel = f[2], status = null;
-      if (papel !== 'filho') {
+      if (modo === 'pai') {                                   // Inatividade / Relacionamento Novos
+        if (papel !== 'pai' && papel !== 'carteira') return;
+        status = 'S';
+      } else if (papel !== 'filho') {
         if (modo !== 'comercial') return;
         status = 'S';                                         // Pai/Carteira/Relacionamento: s\u00f3 em andamento
       }
@@ -2045,7 +2098,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (LC.carregando || !LC.url) return;
     if (!totalZeev() && (tent || 0) < 20) { setTimeout(function () { carregarTudo((tent || 0) + 1); }, 500); return; }
     var modo = modoNecessario();
-    if (modo || stInst.periodo) return carregarFunil(modo);
+    if (modo || periodoEfetivo()) return carregarFunil(modo);
     var u0 = new URL(LC.url);
     var base = baseDe(u0.href);
     var total = totalZeev();
@@ -2128,7 +2181,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     }).catch(function (e) { fim('n\u00e3o foi poss\u00edvel carregar a lista completa (' + (e && e.message) + ')'); });
   }
   function carregarFunil(modo) {
-    var u0 = new URL(LC.url), base = baseDe(u0.href), per = stInst.periodo || '';
+    var u0 = new URL(LC.url), base = baseDe(u0.href), per = periodoEfetivo();
     var fontes = (modo ? fontesFunil(modo, u0) : [u0.href]).map(function (h) {
       var u = new URL(h); return aplicarPeriodo(u, per) ? u.href : null;
     }).filter(Boolean);
@@ -2136,16 +2189,16 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     LC.carregando = true; LC.cancelar = false; LC.erro = ''; LC.base = base; LC.parcial = itens;
     var tRender = 0;
     function progresso() {
-      LC.prog = 'Carregando ' + (modo ? 'o funil ' + (modo === 'comercial' ? 'comercial' : 'jur\u00eddico') : '') +
+      LC.prog = 'Carregando ' + (modo ? (modo === 'pai' ? 'os leads em andamento' : 'o funil ' + (modo === 'comercial' ? 'comercial' : 'jur\u00eddico')) : '') +
         (per ? ' (' + nomePeriodo(per).toLowerCase() + ')' : '') + ': ' + fmtN(itens.length) + (total ? ' de ' + fmtN(total) : '') + '\u2026';
       if (Date.now() - tRender > 400) { tRender = Date.now(); renderInst(); }
     }
-    function mudou() { return LC.cancelar || base !== LC.base || per !== (stInst.periodo || '') || !serve(modo, modoNecessario()); }
+    function mudou() { return LC.cancelar || base !== LC.base || per !== periodoEfetivo() || !serve(modo, modoNecessario()); }
     function fim(msg) {
       if (acabou) return;
       acabou = true;
       LC.carregando = false; LC.prog = ''; LC.parcial = null;
-      var trocou = LC.cancelar || base !== LC.base || per !== (stInst.periodo || '') || !serve(modo, modoNecessario());
+      var trocou = LC.cancelar || base !== LC.base || per !== periodoEfetivo() || !serve(modo, modoNecessario());
       if (msg) { LC.erro = msg; LC.completo = null; }
       else if (!trocou) {
         LC.completo = { base: base, itens: itens, em: new Date(), total: itens.length, funil: modo, periodo: per };
@@ -2227,15 +2280,17 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
 
   // \u2550\u2550\u2550 C\u00d3PIA LOCAL DA LISTA (abre na hora ao voltar para a tela) \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
   // A lista carregada \u00e9 guardada no IndexedDB do navegador CRIPTOGRAFADA (AES-GCM 256). A chave
-  // fica s\u00f3 no sessionStorage desta aba: fechou a aba, a c\u00f3pia fica ileg\u00edvel e \u00e9 apagada na pr\u00f3xima
-  // abertura. Validade: CFG.lista.cacheHoras. Sem WebCrypto/IndexedDB, simplesmente n\u00e3o usa c\u00f3pia.
+  // fica no localStorage deste navegador: a c\u00f3pia abre na hora em qualquer aba e ao reabrir o Zeev,
+  // e expira em CFG.lista.cacheHoras (registros vencidos s\u00e3o ignorados e substitu\u00eddos). Sem WebCrypto/IndexedDB, simplesmente n\u00e3o usa c\u00f3pia.
   var CACHE = { db: null, chave: null, ok: !!(window.crypto && crypto.subtle && window.indexedDB) };
   function b64(buf) { var s2 = '', a = new Uint8Array(buf); for (var i = 0; i < a.length; i++) s2 += String.fromCharCode(a[i]); return btoa(s2); }
   function deB64(t) { return Uint8Array.from(atob(t), function (c) { return c.charCodeAt(0); }); }
   function abrirCache() {
     if (!CACHE.ok) return Promise.reject(new Error('sem suporte'));
     if (CACHE.pronto) return CACHE.pronto;
-    var novaAba = !sessionStorage.getItem('lcbkCk');
+    // chave no localStorage: a c\u00f3pia vale entre abas e ao reabrir o Zeev (at\u00e9 CFG.lista.cacheHoras)
+    try { if (!localStorage.getItem('lcbkCk') && sessionStorage.getItem('lcbkCk')) localStorage.setItem('lcbkCk', sessionStorage.getItem('lcbkCk')); } catch (e) { /* ignora */ }
+    var novaAba = !localStorage.getItem('lcbkCk');
     CACHE.pronto = new Promise(function (ok, erro) {
       var req = indexedDB.open('lcbkCache', 1);
       req.onupgradeneeded = function () { req.result.createObjectStore('listas', { keyPath: 'k' }); };
@@ -2251,10 +2306,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
           return crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
         }).then(function (k) {
           CACHE.chave = k;
-          return crypto.subtle.exportKey('raw', k).then(function (raw) { sessionStorage.setItem('lcbkCk', b64(raw)); return db; });
+          return crypto.subtle.exportKey('raw', k).then(function (raw) { localStorage.setItem('lcbkCk', b64(raw)); return db; });
         });
       }
-      return crypto.subtle.importKey('raw', deB64(sessionStorage.getItem('lcbkCk')), 'AES-GCM', false, ['encrypt', 'decrypt'])
+      return crypto.subtle.importKey('raw', deB64(localStorage.getItem('lcbkCk')), 'AES-GCM', false, ['encrypt', 'decrypt'])
         .then(function (k) { CACHE.chave = k; return db; });
     });
     return CACHE.pronto;
@@ -2265,7 +2320,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function salvarCache() {
     if (!CACHE.ok || !LC.completo) return;
     var base = LC.completo.base, chaveC = base + '|' + (LC.completo.funil || '') + (LC.completo.periodo ? '|' + LC.completo.periodo : '');
-    try { sessionStorage.setItem('lcbkUlt:' + location.pathname, JSON.stringify({ base: base, funil: LC.completo.funil || '' })); } catch (e) { /* ignora */ }
+    try { localStorage.setItem('lcbkUlt:' + location.pathname, JSON.stringify({ base: base, funil: LC.completo.funil || '' })); } catch (e) { /* ignora */ }
     var pacote = {
       itens: LC.completo.itens.map(function (it) { var c = {}; for (var k in it) if (k !== 'tr') c[k] = it[k]; return c; }),
       funil: LC.completo.funil || '',
@@ -2287,18 +2342,18 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (!CACHE.ok || CACHE.restaurando === base) return;
     CACHE.restaurando = base;
     var precisa = funilSalvo != null ? funilSalvo : modoNecessario();
-    var chaves = precisa === 'juridico' ? ['juridico', 'comercial'] : [precisa];
+    var chaves = precisa === 'juridico' ? ['juridico', 'comercial'] : precisa === 'pai' ? ['pai', 'comercial'] : [precisa];
     abrirCache().then(function (db) {
       var tentar = function (ix) {
         if (ix >= chaves.length) return Promise.resolve(null);
-        return lerReg(db, base + '|' + chaves[ix] + (stInst.periodo ? '|' + stInst.periodo : '')).then(function (r) { return r || tentar(ix + 1); });
+        return lerReg(db, base + '|' + chaves[ix] + (periodoEfetivo() ? '|' + periodoEfetivo() : '')).then(function (r) { return r || tentar(ix + 1); });
       };
       return tentar(0);
     }).then(function (p2) {
       if (!p2 || LC.completo || LC.base !== base) return;
       var agora = new Date();
       p2.itens.forEach(function (it) { if (it.ativo && it.due && it.due.date) it.late = it.due.date < agora; });
-      LC.completo = { base: base, itens: p2.itens, em: new Date(p2.em), total: p2.total, daCopia: true, funil: p2.funil || '', periodo: stInst.periodo || '' };
+      LC.completo = { base: base, itens: p2.itens, em: new Date(p2.em), total: p2.total, daCopia: true, funil: p2.funil || '', periodo: periodoEfetivo() };
       if (p2.form && !FORM.em) { FORM.porSol = p2.form.porSol; FORM.em = new Date(p2.form.em); FORM.base = base; }
       if (p2.perda && !PERDA.porSol) { PERDA.porSol = p2.perda.porSol; PERDA.em = new Date(p2.perda.em); }
       renderInst();
@@ -3130,6 +3185,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     });
     if (stInst.ator && !atores[stInst.ator]) stInst.ator = '';
     var itens = stInst.ator && !semRecorte ? todos.filter(function (it) { return chaveAtor(it) === stInst.ator; }) : todos;
+    if (layoutId === 'inatividade' || layoutId === 'relnovos') {        // colunas = meses de entrada, do mais antigo ao atual
+      var etapaM = L.etapa, contM = {};
+      lidos.forEach(function (it) { if (antigoNa(it, etapaM)) contM[mesChave(it.inicioEm)] = 1; });
+      MESES.cols = Object.keys(contM).sort().map(function (k) {
+        return { id: 'mes_' + k, name: nomeMesChave(k), dica: etapaM === 'ppp' ? 'PPP abertos neste m\u00eas e ainda parados' : 'PPF abertos neste m\u00eas e ainda em PPF' };
+      });
+    }
     if (layoutId === 'rejeitados') {                                  // colunas = motivos presentes na lista
       var cont = {}, nomeM = {};
       lidos.forEach(function (it) {
@@ -3342,7 +3404,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var origem = completo
       ? (LC.completo.periodo ? nomePeriodo(LC.completo.periodo) + ': ' + fmtN(lidos.length) + ' carregadas' +
            (LC.completo.funil ? ' (funil ' + (LC.completo.funil === 'comercial' ? 'comercial' : 'jur\u00eddico') + ')' : '')
-         : LC.completo.funil ? 'Funil ' + (LC.completo.funil === 'comercial' ? 'comercial' : 'jur\u00eddico') + ': ' + fmtN(lidos.length) + ' carregadas (s\u00f3 o que a esteira usa)'
+         : LC.completo.funil ? (LC.completo.funil === 'pai' ? 'Leads em andamento' : 'Funil ' + (LC.completo.funil === 'comercial' ? 'comercial' : 'jur\u00eddico')) + ': ' + fmtN(lidos.length) + ' carregadas (s\u00f3 o que a esteira usa)'
          : LC.completo.limitado ? fmtN(lidos.length) + ' de ' + fmtN(total) + ' carregados'
                               : 'Todas as ' + fmtN(lidos.length) + ' carregadas') +
         ' \u00e0s ' + LC.completo.em.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
@@ -3472,7 +3534,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var tb;
     busca.addEventListener('input', function () {
       clearTimeout(tb);
-      tb = setTimeout(function () { stInst.busca = clean(busca.value); buscarNoZeev(stInst.busca); renderInst(); }, 150);
+      tb = setTimeout(function () {
+        if (comandoAtivacao(busca.value)) return;
+        stInst.busca = clean(busca.value); buscarNoZeev(stInst.busca); renderInst();
+      }, 150);
     });
     uiI.tools.appendChild(busca);
     uiI.btnTudo = el('button', 'lcbk-btn');
@@ -3658,7 +3723,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
 
   function abrirUltimaCopia() {
     var ult = null;
-    try { ult = JSON.parse(sessionStorage.getItem('lcbkUlt:' + location.pathname) || 'null'); } catch (e) { /* ignora */ }
+    try { ult = JSON.parse(localStorage.getItem('lcbkUlt:' + location.pathname) || 'null'); } catch (e) { /* ignora */ }
     if (!ult || !ult.base || LC.url) return;
     LC.url = ult.base; LC.base = ult.base;
     restaurarCache(ult.base, ult.funil);
