@@ -2743,19 +2743,23 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         var meio = new Date(ini.getTime() + Math.floor(dias / 2) * DIA), depois = new Date(meio.getTime() + DIA);
         return lerFormPai(fluxo, q, ini, meio, por, (prof || 0) + 1).then(function () { return lerFormPai(fluxo, q, depois, fim, por, (prof || 0) + 1); });
       }
-      Object.keys(tmp).forEach(function (k) { por[k] = tmp[k]; });
+      Object.keys(tmp).forEach(function (k) { por[k] = tmp[k]; FORM.porSol[k] = tmp[k]; });
+      if (uiI.board) renderInst();                            // mostra os valores desta parte j\u00e1
     });
   }
   function carregarFormPai(lay, lidos) {
     if (FORMP.carregando) return;
     var hoje = new Date(); hoje.setHours(0, 0, 0, 0);
     var q = {}, ini;
+    var fim = hoje;
     if (lay === 'triagem') ini = inicioDoMes();                                 // triagem: abertos no m\u00eas
     else {                                                                       // Inatividade / Relacionamento Novos
       q.flowStatus = 'S';
-      lidos.forEach(function (it) { if (it.tipo !== 'filho' && it.ativo && it.inicioEm && (!ini || it.inicioEm < ini)) ini = it.inicioEm; });
+      var etapa = lay === 'inatividade' ? 'ppp' : 'ppf';                        // s\u00f3 o per\u00edodo dos cards desta esteira
+      lidos.forEach(function (it) { if (antigoNa(it, etapa) && (!ini || it.inicioEm < ini)) ini = it.inicioEm; });
       if (!ini) return;
       ini = new Date(ini.getFullYear(), ini.getMonth(), ini.getDate());
+      fim = new Date(inicioDoMes().getTime() - DIA);                            // at\u00e9 o fim do m\u00eas passado
     }
     var chave = LC.base + '|' + lay + '|' + ddmmaaaa(ini);
     FORMP.carregando = true; FORMP.erro = '';
@@ -2767,7 +2771,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         setTimeout(salvarCache, 0);
         return renderInst();
       }
-      lerFormPai(fl[i++], q, ini, hoje, por).then(prox, function (e) {
+      lerFormPai(fl[i++], q, ini, fim, por).then(prox, function (e) {
         FORMP.erro = (e && e.message) || 'erro'; FORMP.carregando = false; FORMP.chave = chave; renderInst();
       });
     })();
