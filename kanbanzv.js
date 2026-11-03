@@ -137,7 +137,7 @@
     // no pr\u00f3prio navegador (localStorage ou link ?chave=on). Isso controla s\u00f3 a TELA:
     // o destino precisa ter o pr\u00f3prio controle de acesso.
     atalhos: [
-      { chave: 'lcbPainel', texto: 'Painel da opera\u00e7\u00e3o', url: 'https://dashboard.lcbank.com.br/',
+      { chave: 'lcbPainel', texto: 'Dashboard', url: 'https://dashboard.lcbank.com.br/',
         depoisDe: 'Acompanhar solicita\u00e7\u00f5es' }
     ],
 
@@ -903,6 +903,14 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (info && info.tipo) tags.appendChild(el('span', 'lcbk-chip is-ativo', info.tipo));
   }
 
+  // As colunas v\u00e3o at\u00e9 o p\u00e9 da tela: ocultar a faixa de pessoas (ou o aviso) d\u00e1 mais altura ao quadro.
+  function ajustarAltura(b) {
+    if (!b || !b.isConnected) return;
+    var topo = Math.max(0, b.getBoundingClientRect().top);
+    b.style.setProperty('--lcbk-alt', Math.max(320, Math.round(window.innerHeight - topo - 70)) + 'px');
+  }
+  window.addEventListener('resize', function () { ajustarAltura(ui && ui.board); ajustarAltura(uiI && uiI.board); });
+
   function botaoMais(resto, onClick) {
     var b = el('button', 'lcbk-btn lcbk-mais',
       'Mostrar mais ' + fmtN(Math.min(resto, CFG.lista.cardsPorColuna)) + ' (' + fmtN(resto) + ' restantes)');
@@ -1137,6 +1145,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       frag.appendChild(sec);
     });
     ui.board.replaceChildren(frag);
+    requestAnimationFrame(function () { ajustarAltura(ui.board); });
     ui.resumo.replaceChildren(equipe ? resumoEquipe(porFase) : document.createTextNode(''));
     ui.resumo.style.display = equipe && state.view === 'kanban' ? '' : 'none';
     ui.filtros.style.display = equipe ? '' : 'none';
@@ -1212,7 +1221,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-search{min-width:200px}',
       '.lcbk-status{font-size:12px;color:#6b778c;margin-left:auto}',
       '.lcbk-seg:focus-visible,.lcbk-btn:focus-visible,.lcbk-select:focus-visible,.lcbk-search:focus-visible,.lcbk-card:focus-visible{outline:2px solid #3b6fd8;outline-offset:2px}',
-      '.lcbk-col{background:#f4f6f9;border-radius:10px;border-top:3px solid #3b6fd8;display:flex;flex-direction:column;min-height:160px;max-height:calc(100vh - 260px)}',
+      '.lcbk-col{background:#f4f6f9;border-radius:10px;border-top:3px solid #3b6fd8;display:flex;flex-direction:column;min-height:160px;max-height:var(--lcbk-alt,calc(100vh - 260px))}',
       '.lcbk-col.is-alert{border-top-color:#c8372d;background:#fbf3f2}',
       '.lcbk-col.is-ok{border-top-color:#2e8b57}',
       '.lcbk-head{display:flex;justify-content:space-between;align-items:baseline;padding:12px 14px 8px;gap:8px}',
@@ -2440,7 +2449,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   // baixa o log de um recorte; devolve s\u00f3 os campos necess\u00e1rios
   function baixarLog(fluxo, flowStatus, ini, fim, extra, est) {
-    var q = 'reportType=ihavepermission&taskStatus=S&flowStatus=' + flowStatus +
+    // Painel do gestor: vis\u00e3o de Monitorar. Motivos das perdas: o mesmo recorte da p\u00e1gina
+    // (um vendedor em Acompanhar l\u00ea s\u00f3 o hist\u00f3rico das solicita\u00e7\u00f5es dele).
+    var rt = 'ihavepermission';
+    if (est !== PROD && LC.base) { try { rt = new URL(LC.base).searchParams.get('reportType') || rt; } catch (e) { /* ignora */ } }
+    var q = 'reportType=' + encodeURIComponent(rt) + '&taskStatus=S&flowStatus=' + flowStatus +
       '&codFlowsOrServices=' + encodeURIComponent(fluxo[0] + ';' + fluxo[1] + ';0;0') +
       '&startBegin=' + encodeURIComponent(ddmmaaaa(ini)) + '&startEnd=' + encodeURIComponent(ddmmaaaa(fim)) + (extra || '');
     (est || PROD).consultas++;
@@ -3242,6 +3255,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       uiI.btnResumo.textContent = verResumo ? 'Ocultar pessoas' : 'Mostrar pessoas';
       uiI.btnResumo.setAttribute('aria-pressed', verResumo ? 'true' : 'false');
     }
+    requestAnimationFrame(function () { ajustarAltura(uiI.board); });
     renderPainel(lidos, completo, totalZeev());
     if (uiI.btnPainel) {
       uiI.btnPainel.style.display = EH_GESTOR && stInst.view === 'kanban' ? '' : 'none';
