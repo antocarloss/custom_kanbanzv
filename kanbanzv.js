@@ -1409,6 +1409,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-gaveta .lcbk-btn{text-decoration:none}',
       '.lcbk-gaveta-frame{flex:1;width:100%;border:0;background:#fff;border-radius:0 0 12px 12px}',
       '.lcbk-busca-vazia{grid-column:1 / -1;font-size:13px;color:#404857;background:#fff;border:1px dashed #c9cfda;border-radius:10px;padding:18px;margin:0}',
+      '.lcbk-btn.is-on{background:#e3f4ea;border-color:#2e7d4f;color:#1f5e3b}',
       '.lcbk-comigo.is-on{background:#1b2f5c;color:#fff;border-color:#1b2f5c}',
       '.lcbk-soma{color:#2e7d4f!important;font-weight:600}',
       '.lcbk-info dd.is-face{color:#2e7d4f;font-weight:700;font-variant-numeric:tabular-nums}',
@@ -1953,11 +1954,63 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       .then(function () { MEU.carregando = false; renderInst(); });
   }
 
+  // \u2550\u2550\u2550 FILTRO FIXO (por navegador) \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+  // O Zeev volta para a lista padr\u00e3o a cada login. "Fixar filtro" guarda os filtros da lista atual neste
+  // navegador: quando o Zeev abrir a lista padr\u00e3o, o Kanban usa o filtro fixo. Se a pessoa aplicar outro
+  // filtro no Zeev, o Kanban segue esse outro (e oferece fix\u00e1-lo).
+  var CHAVE_FIXO = 'lcbkFiltroFixo:' + location.pathname;
+  var PARAMS_PAGINA = ['pagenumber', 'recordsperpage'];
+  function filtroFixo() { try { return JSON.parse(localStorage.getItem(CHAVE_FIXO) || 'null'); } catch (e) { return null; } }
+  function ehListaPadrao(x) {
+    var tem = false;
+    x.searchParams.forEach(function (v, k) { if (['pagenumber', 'recordsperpage', 'reporttype', 'taskstatus'].indexOf(lower(k)) === -1) tem = true; });
+    return !tem;
+  }
+  function aplicarFixo(x) {
+    var fx = filtroFixo();
+    if (!fx || !fx.q || !ehListaPadrao(x)) return x;
+    var y = new URL(x.pathname + '?' + fx.q, location.origin);
+    y.searchParams.set('pagenumber', x.searchParams.get('pagenumber') || '1');
+    y.searchParams.set('recordsperpage', x.searchParams.get('recordsperpage') || '60');
+    return y;
+  }
+  function fixarFiltroAtual() {
+    if (!LC.url) return;
+    var u = new URL(LC.url);
+    PARAMS_PAGINA.forEach(function (k) { u.searchParams.delete(k); });
+    u.searchParams.delete('keyword');
+    localStorage.setItem(CHAVE_FIXO, JSON.stringify({ q: u.searchParams.toString(), em: new Date().toISOString() }));
+  }
+  function usandoFixo() {
+    var fx = filtroFixo();
+    if (!fx || !LC.base) return false;
+    var a = new URL(LC.base), b = new URL(location.origin + new URL(LC.base).pathname + '?' + fx.q);
+    return baseDe(a.href) === baseDe(b.href);
+  }
+  // fluxos da lista (codFlowsOrServices): permite ler valores/motivos de qualquer vers\u00e3o de fluxo (v1, v2\u2026)
+  function fluxosDaBase() {
+    if (!LC.base) return [];
+    var out = [], vistos = {};
+    new URL(LC.base).searchParams.getAll('codFlowsOrServices').forEach(function (v) {
+      String(v).split(/[,|]/).forEach(function (p) {
+        var m = p.match(/^(\d+);([0-9a-f-]+)/i);
+        if (m && !vistos[m[1]]) { vistos[m[1]] = 1; out.push([m[1], m[2], 'lista']); }
+      });
+    });
+    return out;
+  }
+  function fluxosNegociacao() {
+    var naoNeg = CFG.producao.fluxos.filter(function (f) { return f[2] !== 'filho'; }).map(function (f) { return f[0]; });
+    var daLista = fluxosDaBase().filter(function (f) { return naoNeg.indexOf(f[0]) === -1; });
+    return daLista.length ? daLista : CFG.producao.fluxos.filter(function (f) { return f[2] === 'filho'; });
+  }
+
   function registrarUrl(u) {
     try {
       var x = new URL(u, location.origin);
       if (x.origin !== location.origin || !CFG.lista.padrao.test(x.pathname + x.search)) return;
       if (LB.urls[x.href] || ehNossa(x.href)) return;        // consultas do pr\u00f3prio Kanban
+      x = aplicarFixo(x);                                    // lista padr\u00e3o do Zeev + filtro fixo = filtro fixo
       var b = baseDe(x.href);
       if (LC.carregando && b === LC.base) return;            // s\u00e3o as nossas pr\u00f3prias consultas
       if (LC.carregando) LC.cancelar = true;                  // filtro mudou no meio da carga: para a antiga
@@ -2111,7 +2164,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (LC.carregando || !LC.url) return;
     if (!totalZeev() && (tent || 0) < 20) { setTimeout(function () { carregarTudo((tent || 0) + 1); }, 500); return; }
     var modo = modoNecessario();
-    if (modo || periodoEfetivo()) return carregarFunil(modo);
+    if (modo || periodoEfetivo() || usandoFixo()) return carregarFunil(modo);
     var u0 = new URL(LC.url);
     var base = baseDe(u0.href);
     var total = totalZeev();
@@ -2730,7 +2783,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (FORM.carregando || !LC.url) return;
     FORM.carregando = true; FORM.erro = ''; FORM.incompleto = 0;
     var base = LC.base || baseDe(LC.url), por = {};
-    var filhos = CFG.producao.fluxos.filter(function (f) { return f[2] === 'filho'; });
+    var filhos = fluxosNegociacao();
     var i = 0;
     function prox() {
       if (i >= filhos.length) return Promise.resolve();
@@ -2818,7 +2871,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var hoje = new Date(); hoje.setHours(0, 0, 0, 0);
     var base = lerData(CFG.producao.inicioBase) || new Date(2020, 0, 1);
     var acc = [];
-    var filhos = CFG.producao.fluxos.filter(function (f) { return f[2] === 'filho'; });
+    var filhos = fluxosNegociacao();
     var maisAntiga = null;
     (LC.completo ? LC.completo.itens : []).forEach(function (it) {
       if (it.tipo === 'filho' && !it.ativo && perdida(it) && it.fimEm && (!maisAntiga || it.fimEm < maisAntiga)) maisAntiga = it.fimEm;
@@ -3437,6 +3490,12 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       uiI.btnResumo.setAttribute('aria-pressed', verResumo ? 'true' : 'false');
     }
     requestAnimationFrame(function () { ajustarAltura(uiI.board); });
+    if (uiI.btnFixo) {
+      var fixo = usandoFixo(), temFiltro = LC.url && !ehListaPadrao(new URL(LC.url));
+      uiI.btnFixo.textContent = fixo ? 'Filtro fixo \u2713 (soltar)' : 'Fixar filtro';
+      uiI.btnFixo.style.display = fixo || temFiltro ? '' : 'none';
+      uiI.btnFixo.classList.toggle('is-on', fixo);
+    }
     renderPainel(lidos, completo, totalZeev());
     if (uiI.btnPainel) {
       uiI.btnPainel.style.display = EH_GESTOR && stInst.view === 'kanban' ? '' : 'none';
@@ -3502,6 +3561,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         return pagas.length ? ' | pagos do financeiro: ' + n + ' de ' + pagas.length + ' achados no Zeev' +
           (n < pagas.length ? ' (faltam: ' + pagas.filter(function (x) { return !achadas[x]; }).join(', ') + ')' : '') : '';
       })() : '') +
+      (usandoFixo() ? ' | filtro fixo ativo' : '') +
       (stInst.comigo ? ' | s\u00f3 comigo' + (MEU.erro ? ' (n\u00e3o foi poss\u00edvel ler suas tarefas)' : '') : '') + ' | Kanban ' + VERSAO +
       (ocultos ? ' | ' + ocultos + ' oculto(s) pela busca' : '');
     document.documentElement.classList.toggle('lcbk-on', stInst.view === 'kanban');
@@ -3600,6 +3660,19 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       renderInst();
     });
     uiI.tools.appendChild(uiI.btnResumo);
+    uiI.btnFixo = el('button', 'lcbk-btn', 'Fixar filtro');
+    uiI.btnFixo.type = 'button';
+    uiI.btnFixo.addEventListener('click', function () {
+      if (usandoFixo()) {
+        if (!confirm('Soltar o filtro fixo? O Kanban volta a seguir a lista padr\u00e3o do Zeev.')) return;
+        localStorage.removeItem(CHAVE_FIXO);
+      } else {
+        fixarFiltroAtual();
+        alert('Filtro fixado neste computador. Sempre que o Zeev abrir a lista padr\u00e3o, o Kanban usa este filtro.');
+      }
+      renderInst();
+    });
+    uiI.tools.appendChild(uiI.btnFixo);
     var lbl = el('label', 'lcbk-check');
     uiI.outras = el('input');
     uiI.outras.type = 'checkbox';
