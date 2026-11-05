@@ -60,7 +60,11 @@
       atualizarMin: 15,
       triagem: 'T01',             // Pai: T01-Analisar Viabilidade finalizada = 1 triagem (data de finaliza\u00e7\u00e3o)
       aceite: 'T07',              // Filho: entrou na T07 = proposta aceita (data de recebimento da 1\u00aa T07)
-      formal: 'T24',              // Filho: T24 finalizada = cess\u00e3o protocolada (data de finaliza\u00e7\u00e3o)
+      // Pagos pelo financeiro (relat\u00f3rio di\u00e1rio): s\u00f3 os N\u00daMEROS das propostas, nenhum valor ou dado pessoal.
+      // Uma negocia\u00e7\u00e3o com uma dessas propostas vai para Fechados (PAGO), em qualquer etapa.
+      propostasPagas: ['1863', '1864', '1865', '1866', '1867', '1870', '1873', '1874', '1875',
+                       '3717', '3752', '3787', '3791', '3795'],
+      formal: 'T24',              // Filho: chegou na T24 = fechado formalmente (data de recebimento da T24)
       sdr: ['Raphisa'],
       // Perdida "pelo jur\u00eddico" = a negocia\u00e7\u00e3o passou por uma destas tarefas (reprova\u00e7\u00e3o):
       // T11 Analisar Reprova\u00e7\u00e3o, T15 Analisar Recusa da Reprova\u00e7\u00e3o, T16 Conselho. Sen\u00e3o, "pelo cliente".
@@ -914,6 +918,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   function chipTipo(tags, info) {
     if (info && info.tipo) tags.appendChild(el('span', 'lcbk-chip is-ativo', info.tipo));
+    if (info && info.pagoFin) tags.appendChild(el('span', 'lcbk-chip is-pago', 'Pago (financeiro)'));
+    else if (info && info.pagoZeev) tags.appendChild(el('span', 'lcbk-chip is-pago', 'Comprovante no Zeev'));
   }
 
   // As colunas v\u00e3o at\u00e9 o p\u00e9 da tela: ocultar a faixa de pessoas (ou o aviso) d\u00e1 mais altura ao quadro.
@@ -1411,6 +1417,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-soma.is-prop{color:#1b2f5c!important}',
       '.lcbk-motivo{margin-top:6px;font-size:11.5px;line-height:1.35;color:#a1281f;background:#fbeceb;border-radius:6px;padding:6px 8px}',
       '.lcbk-motivo.is-pend{color:#7a4b00;background:#fff4e0}',
+      '.lcbk-chip.is-pago{background:#e3f4ea;color:#1f5e3b;font-weight:600}',
       '.lcbk-mais{width:100%;margin-top:4px;background:#fff}',
       '.lcbk-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#404857;cursor:pointer}',
       '.lcbk-chip.is-area{background:#f1f2f5;color:#404857}',
@@ -1716,6 +1723,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   //  acompanhamento do ativo) ou foi conclu\u00edda sem perda; Perdidas = encerrada como
   //  cancelada/recusada/reprovada/rejeitada.
   var RE_PERDA = /cancel|recus|reprov|rejeit|perd|desist|desqualif/i;
+  // Fechado formalmente: a negocia\u00e7\u00e3o est\u00e1 NA T24 (ou j\u00e1 passou dela)
+  function noFormal(it) { return it.tipo === 'filho' && it.ativo && codigoDe(it.atividade) === CFG.producao.formal; }
+  function pagoConfirmado(it) { var f = it.info || {}; return it.tipo === 'filho' && (f.pagoFin || f.pagoZeev); }
   function perdida(it) { return RE_PERDA.test((it.status || '') + ' ' + (it.resultado || '')); }
   // Triagem: lead rejeitado = desqualificado (motivo no resumo), viabilidade "desqualificado" ou encerrado como rejeitado/cancelado
   function rejeitadoTriagem(it) {
@@ -1759,8 +1769,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         return colunasEsteira(id).filter(function (c) { return ['ppp', 'negociacao', 'proposta', 'pendencias'].indexOf(c.id) !== -1; })
           .map(function (c) { c.precisaB = false; if (nomes[c.id]) c.name = nomes[c.id]; return c; })
           .concat([{ id: 'fecCom', name: 'Proposta Aceita', ok: true, dica: 'em formaliza\u00e7\u00e3o (fora as pend\u00eancias)' },
-                   { id: 'cessao', name: 'Proposta assinada pelo cliente', dica: 'T23 e T24 em andamento' },
-                   { id: 'fechados', name: 'Fechados (PAGO)', ok: true, dica: 'passou da T24 ou conclu\u00edda', encerrada: true },
+                   { id: 'cessao', name: 'Proposta assinada pelo cliente', dica: 'T23 em andamento' },
+                   { id: 'fechados', name: 'Fechados (PAGO)', ok: true, dica: 'na T24 ou depois, ou conclu\u00edda', encerrada: true },
                    { id: 'perdJur', name: 'Perdidas \u00b7 rejeitada pelo jur\u00eddico', alert: true, dica: 'passou pela reprova\u00e7\u00e3o (T11, T15 ou T16)', encerrada: true },
                    { id: 'perdCli', name: 'Perdidas \u00b7 rejeitada pelo cliente', alert: true, dica: 'cancelada ou recusada pelo cliente', encerrada: true },
                    { id: 'perdNI', name: 'Perdidas \u00b7 motivo n\u00e3o identificado', alert: true, opcional: true, encerrada: true,
@@ -1772,6 +1782,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
           var c1 = it.ativo ? colunaDe(id, it) : 'outros';
           return ['ppp', 'negociacao', 'proposta', 'pendencias'].indexOf(c1) !== -1 ? c1 : 'outros';
         }
+        if (pagoConfirmado(it)) return 'fechados';                       // pago pelo financeiro / comprovante no Zeev
         if (!it.ativo) {
           if (!perdida(it)) return 'fechados';
           if (!PERDA.porSol && !PERDA.carregando && !PERDA.erro && listaPronta()) setTimeout(carregarMotivosPerda, 0);
@@ -1780,7 +1791,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
           if (!PERDA.carregando && PERDA.em && (idade > 30 * 60000 || (!mot && idade > 5 * 60000))) setTimeout(carregarMotivosPerda, 0);
           return mot === 'juridico' ? 'perdJur' : mot === 'cliente' ? 'perdCli' : 'perdNI';
         }
-        if (it.stage === 'pos') return 'fechados';
+        if (it.stage === 'pos' || noFormal(it)) return 'fechados';   // na T24 ou depois = fechado formalmente
         if (it.stage === 'cessao') return 'cessao';
         var c2 = colunaDe(id, it);
         if (c2 === 'pendencias') return 'pendencias';
@@ -1794,7 +1805,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       cols: function () {
         return colunasEsteira(id).map(function (c) {
           c.precisaB = false;
-          if (c.id === 'pos') { c.name = 'Pagos'; c.ok = true; c.encerrada = true; c.dica = 'passou da T24 ou conclu\u00edda'; }
+          if (c.id === 'pos') { c.name = 'Pagos'; c.ok = true; c.encerrada = true; c.dica = 'na T24 ou depois, ou conclu\u00edda'; }
           return c;
         })
           .concat([{ id: 'rejJur', name: 'Rejeitadas pelo Jur\u00eddico', alert: true, encerrada: true,
@@ -1804,6 +1815,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       place: function (it) {
         // mesma regra do comercial: Pagos = passou da T24 (p\u00f3s-cess\u00e3o) ou negocia\u00e7\u00e3o conclu\u00edda sem perda
         if (it.tipo === 'filho' && !it.ativo && !perdida(it)) return 'pos';
+        if (it.tipo === 'filho' && it.ativo && noFormal(it)) return 'pos';      // na T24 ou depois
+        if (pagoConfirmado(it)) return 'pos';                                     // pago pelo financeiro
         if (!it.ativo) {
           if (it.tipo !== 'filho' || !perdida(it)) return 'outros';
           if (!PERDA.porSol && !PERDA.carregando && !PERDA.erro && listaPronta()) setTimeout(carregarMotivosPerda, 0);
@@ -2696,6 +2709,12 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       }
       o.tipo = semDoc(pega(r, F.tipo));
       o.nProp = semDoc(pega(r, F.numeroProposta));
+      o.props = [];
+      h.forEach(function (nome, k) {
+        if (/^numeroProposta/i.test(nome) && !/geral/i.test(nome)) { var v = digits(r[k]); if (v && o.props.indexOf(v) === -1) o.props.push(v); }
+      });
+      var kc = ix('comprovantePagamentoFundo'), ks = ix('situacaoDoComprovanteDePagamento');
+      o.comprovante = (kc >= 0 && !!clean(r[kc])) || (ks >= 0 && /pag|anexad|receb|confirm/i.test(clean(r[ks])));
       o.fundo = semDoc(pega(r, F.fundo));
       var corta = function (t) { t = semDoc(t); return t.length > 220 ? t.slice(0, 217) + '\u2026' : t; };
       o.motJur = corta(pega(r, F.motivoJuridico));
@@ -2786,6 +2805,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (f.face && f.prop) inf.desagio = Math.max(0, 1 - f.prop / f.face);
     if (f.tipo && !inf.tipo) inf.tipo = f.tipo;
     inf.nProp = f.nProp; inf.fundo = f.fundo;
+    var pagas = CFG.producao.propostasPagas || [];
+    inf.pagoFin = (f.props || []).some(function (n) { return pagas.indexOf(n) !== -1; });
+    inf.pagoZeev = !!f.comprovante;
     inf.motJur = f.motJur; inf.motCli = f.motCli; inf.pend = f.pend;
   }
 
@@ -2897,7 +2919,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var n = negs[x.sol] || (negs[x.sol] = { solic: x.solic, t01: '', aceite: null, formal: null });
       if (x.cod === 'T01' && x.ator && !n.t01) n.t01 = x.ator;
       if (x.cod === P.aceite && x.rec && (!n.aceite || x.rec < n.aceite)) n.aceite = x.rec;
-      if (x.cod === P.formal && x.fin && (!n.formal || x.fin < n.formal)) n.formal = x.fin;
+      if (x.cod === P.formal && x.rec && (!n.formal || x.rec < n.formal)) n.formal = x.rec;   // entrou na T24
     });
     var ehSdr = function (nome) {
       return P.sdr.some(function (s) { return lower(nome).indexOf(lower(s)) === 0; });
@@ -3040,7 +3062,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       { n: com.length, t: 'no comercial', s: com.filter(function (it) { return it.late; }).length + ' atrasadas', cor: COR_TIME.comercial, f: filtrar('comercial', 'comercial') },
       { n: jur.length, t: 'no jur\u00eddico', s: jur.filter(function (it) { return it.late; }).length + ' atrasadas', cor: COR_TIME.juridico, f: filtrar('juridico', 'juridico') },
       { n: d ? d.tot.comHoje : null, t: 'propostas aceitas hoje', s: d ? fmtN(d.tot.comMes) + ' no m\u00eas' : 'lendo o log\u2026', cor: '#2e7d4f' },
-      { n: d ? d.tot.forHoje : null, t: 'cess\u00f5es protocoladas hoje', s: d ? fmtN(d.tot.forMes) + ' no m\u00eas' : 'lendo o log\u2026', cor: '#1f5e3b' }
+      { n: d ? d.tot.forHoje : null, t: 'fechados formais hoje (T24)', s: d ? fmtN(d.tot.forMes) + ' no m\u00eas' : 'lendo o log\u2026', cor: '#1f5e3b' }
     ];
     var fun = el('div', 'lcbk-funil');
     fun.setAttribute('role', 'list');
@@ -3183,7 +3205,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       colunasDia(b4, d.dias, 'tri', COR_TIME.triagem);
       frag.appendChild(b4);
     }
-    frag.appendChild(el('p', 'lcbk-nota', 'Mesmas regras da Torre: triagem = T01 do Pai finalizada; proposta aceita = negocia\u00e7\u00e3o entrou na T07; cess\u00e3o protocolada = T24 finalizada. O vendedor \u00e9 o solicitante da negocia\u00e7\u00e3o (quando \u00e9 a SDR, quem fez a T01-Negociar Compra).'));
+    frag.appendChild(el('p', 'lcbk-nota', 'Mesmas regras da Torre: triagem = T01 do Pai finalizada; proposta aceita = negocia\u00e7\u00e3o entrou na T07; fechado formal = chegou na T24. O vendedor \u00e9 o solicitante da negocia\u00e7\u00e3o (quando \u00e9 a SDR, quem fez a T01-Negociar Compra).'));
     p.replaceChildren(frag);
   }
 
@@ -3473,6 +3495,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         !FORM.em && LC.carregando ? ' | valores e motivos entram quando a lista terminar' : FORM.erro ? ' | valores indispon\u00edveis (' + FORM.erro + ')' :
         FORM.incompleto ? ' | valores: export cortado em 1.000 linhas' : '') : '') +
       (LC.completo && LC.completo.daCopia && LC.carregando ? ' | c\u00f3pia salva, atualizando\u2026' : '') +
+      (layoutId === 'comercial' && FORM.em ? (function () {
+        var achadas = {}, pagas = CFG.producao.propostasPagas || [];
+        Object.keys(FORM.porSol).forEach(function (k) { (FORM.porSol[k].props || []).forEach(function (n) { if (pagas.indexOf(n) !== -1) achadas[n] = 1; }); });
+        var n = Object.keys(achadas).length;
+        return pagas.length ? ' | pagos do financeiro: ' + n + ' de ' + pagas.length + ' achados no Zeev' +
+          (n < pagas.length ? ' (faltam: ' + pagas.filter(function (x) { return !achadas[x]; }).join(', ') + ')' : '') : '';
+      })() : '') +
       (stInst.comigo ? ' | s\u00f3 comigo' + (MEU.erro ? ' (n\u00e3o foi poss\u00edvel ler suas tarefas)' : '') : '') + ' | Kanban ' + VERSAO +
       (ocultos ? ' | ' + ocultos + ' oculto(s) pela busca' : '');
     document.documentElement.classList.toggle('lcbk-on', stInst.view === 'kanban');
