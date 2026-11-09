@@ -1419,6 +1419,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-motivo{margin-top:6px;font-size:11.5px;line-height:1.35;color:#a1281f;background:#fbeceb;border-radius:6px;padding:6px 8px}',
       '.lcbk-motivo.is-pend{color:#7a4b00;background:#fff4e0}',
       '.lcbk-chip.is-pago{background:#e3f4ea;color:#1f5e3b;font-weight:600}',
+      '.lcbk-exp{border:1px solid #c9cfda;background:#fff;color:#1b2f5c;font-family:inherit;font-size:11px;font-weight:600;border-radius:6px;padding:3px 8px;margin-left:6px;cursor:pointer}',
+      '.lcbk-exp:hover{background:#eef2f9}',
+      '.lcbk-exp:disabled{opacity:.6;cursor:wait}',
       '.lcbk-mais{width:100%;margin-top:4px;background:#fff}',
       '.lcbk-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#404857;cursor:pointer}',
       '.lcbk-chip.is-area{background:#f1f2f5;color:#404857}',
@@ -2800,6 +2803,92 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       .catch(function (e) { FORM.erro = (e && e.message) || 'erro'; })
       .then(function () { FORM.carregando = false; if (uiI.board) renderInst(); });
   }
+  // \u2550\u2550\u2550 EXPORTAR COLUNA (CSV para Excel) \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+  // Os dados de contato (nome, CPF, telefone, e-mail) N\u00c3O ficam no Kanban: s\u00e3o buscados no export de
+  // solicita\u00e7\u00f5es do pr\u00f3prio Zeev S\u00d3 no clique, usados para montar o arquivo e descartados.
+  var CAMPOS_CONTATO = {
+    nome: ['nomeCompletoCliente', 'nomeAutor', 'nomeDoAdvogado', 'nomeAdvContratual'],
+    cpf: ['cpfDoCliente', 'cpfAutor', 'cpfDoAdvogado', 'cpfAdvContratual'],
+    tel: ['whatsappTelefoneDoCliente', 'whatsappTelefoneAutor', 'whatsappTelefoneDoAdvogado', 'wtAdvContratual'],
+    email: ['eMailDoCliente', 'emailAutor', 'eMailDoAdvogado', 'emailAdvContratual'],
+    origem: ['siteDeOrigem', 'origemDoCliente']
+  };
+  function lerContatos(fluxo, q, ini, fim, alvo, out, prof) {
+    var u = new URL(LC.base || baseDe(LC.url));
+    u.pathname = u.pathname.replace(/\/instances\/?$/, '/instances/export/requests/csvsemicolon');
+    ['pagenumber', 'recordsperpage', 'keyword', 'flowStatus', 'startBegin', 'startEnd', 'endBegin', 'endEnd'].forEach(function (k) { u.searchParams.delete(k); });
+    u.searchParams.set('codFlowsOrServices', fluxo[0] + ';' + fluxo[1] + ';0;0');
+    if (q.flowStatus) u.searchParams.set('flowStatus', q.flowStatus);
+    u.searchParams.set('startBegin', ddmmaaaa(ini)); u.searchParams.set('startEnd', ddmmaaaa(fim));
+    return getJson(nossa(u.href)).then(function (j) {
+      var linhas = lerCsv(decodificar(j && j.success && j.success.fileContent));
+      var dias = Math.round((fim - ini) / DIA);
+      if (linhas.length - 1 >= CFG.producao.limiteLinhas && dias >= 1 && (prof || 0) < 12) {
+        var meio = new Date(ini.getTime() + Math.floor(dias / 2) * DIA), depois = new Date(meio.getTime() + DIA);
+        return lerContatos(fluxo, q, ini, meio, alvo, out, (prof || 0) + 1).then(function () { return lerContatos(fluxo, q, depois, fim, alvo, out, (prof || 0) + 1); });
+      }
+      if (!linhas.length) return;
+      var h = linhas[0].map(clean), iSol = h.indexOf('N\u00famero da solicita\u00e7\u00e3o');
+      var pega = function (r, nomes) { for (var i = 0; i < nomes.length; i++) { var k = h.indexOf(nomes[i]); if (k >= 0 && clean(r[k])) return clean(r[k]); } return ''; };
+      linhas.slice(1).forEach(function (r) {
+        var sol = digits(r[iSol]);
+        if (!sol || !alvo[sol]) return;                       // s\u00f3 as solicita\u00e7\u00f5es da coluna
+        out[sol] = { nome: pega(r, CAMPOS_CONTATO.nome), cpf: pega(r, CAMPOS_CONTATO.cpf), tel: pega(r, CAMPOS_CONTATO.tel),
+                     email: pega(r, CAMPOS_CONTATO.email), origem: pega(r, CAMPOS_CONTATO.origem) };
+      });
+    });
+  }
+  function csvCampo(v) { v = v == null ? '' : String(v); return /[";\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  function exportarColuna(col, itens, botao) {
+    if (!itens.length) return;
+    if (!confirm('O arquivo vai ter dados pessoais dos clientes (nome, CPF, telefone, e-mail).\n' +
+                 'Use s\u00f3 para o trabalho, n\u00e3o encaminhe para fora da LCbank e apague quando n\u00e3o precisar mais.\n\nGerar o arquivo de "' + col.name + '" (' + itens.length + ' itens)?')) return;
+    var txt0 = botao.textContent;
+    botao.disabled = true; botao.textContent = 'Gerando\u2026';
+    var alvo = {}, ini = null, ativos = true, temPai = false, temFilho = false;
+    itens.forEach(function (it) {
+      alvo[it.num] = 1;
+      if (it.inicioEm && (!ini || it.inicioEm < ini)) ini = it.inicioEm;
+      if (!it.ativo) ativos = false;
+      if (it.tipo === 'filho') temFilho = true; else temPai = true;
+    });
+    var hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    ini = ini ? new Date(ini.getFullYear(), ini.getMonth(), ini.getDate()) : new Date(2020, 0, 1);
+    var fl = [];
+    if (temPai) fl = fl.concat(CFG.producao.fluxos.filter(function (f) { return f[2] !== 'filho'; }), fluxosDaBase());
+    if (temFilho) fl = fl.concat(fluxosNegociacao());
+    var vistosF = {};
+    fl = fl.filter(function (f) { if (vistosF[f[0]]) return false; vistosF[f[0]] = 1; return true; });
+    var out = {}, i = 0, q = ativos ? { flowStatus: 'S' } : {};
+    (function prox() {
+      if (i >= fl.length || Object.keys(out).length >= itens.length) return gerar();
+      lerContatos(fl[i++], q, ini, hoje, alvo, out).then(prox, function () { prox(); });
+    })();
+    function gerar() {
+      var cab = ['N\u00famero', 'Nome', 'CPF', 'Telefone/WhatsApp', 'E-mail', 'Processo', 'Fluxo', 'Coluna', 'Atividade atual', 'Com quem',
+                 'Prazo', 'Situa\u00e7\u00e3o', 'Tipo de ativo', 'Valor de face', 'Proposta', 'Origem', 'Abertura', 'Link'];
+      var linhas = [cab.join(';')];
+      itens.forEach(function (it) {
+        var c = out[it.num] || {}, inf = it.info || {};
+        linhas.push([it.numero, c.nome || it.titulo, c.cpf || '', c.tel || '', c.email || '', inf.procNum || '', it.processo || '',
+          col.name, it.atividade || '', it.quem || '', it.prazoTxt || (it.due && it.due.date ? fmtData(it.due.date) : ''),
+          it.ativo ? (it.late ? 'Atrasada' : 'No prazo') : (it.status || 'Encerrada'), inf.tipo || '',
+          inf.faceN ? Math.round(inf.faceN * 100) / 100 : '', inf.propN ? Math.round(inf.propN * 100) / 100 : '', c.origem || '',
+          it.inicioEm ? fmtData(it.inicioEm) : '', it.href || ''].map(csvCampo).join(';'));
+      });
+      var blob = new Blob(['\ufeff' + linhas.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'kanban_' + slug(col.name).replace(/^m_/, '') + '_' + ddmmaaaa(new Date()).replace(/\//g, '-') + '.csv';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+      var semContato = itens.filter(function (it) { var c = out[it.num]; return !(c && (c.tel || c.email)); }).length;
+      out = null;                                             // descarta os contatos
+      botao.disabled = false; botao.textContent = txt0;
+      if (semContato) setTimeout(function () { alert(semContato + ' item(ns) sa\u00edram sem telefone/e-mail: o export do Zeev n\u00e3o trouxe esses dados (permiss\u00e3o ou fluxo).'); }, 300);
+    }
+  }
+
   var FORMP = { em: null, chave: '', carregando: false, erro: '' };
   function lerFormPai(fluxo, q, ini, fim, por, prof) {
     var u = new URL(LC.base || baseDe(LC.url));
@@ -3404,6 +3493,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       }
       head.appendChild(h);
       head.appendChild(el('span', 'lcbk-count', fmtN(n)));
+      if (list.length) {
+        var bx = el('button', 'lcbk-exp', 'Exportar');
+        bx.type = 'button';
+        bx.title = 'Baixar esta coluna em planilha (CSV), com nome, CPF, telefone e e-mail';
+        (function (col, itensCol, b) { b.addEventListener('click', function (e) { e.stopPropagation(); exportarColuna(col, itensCol, b); }); })(c, list.slice(), bx);
+        head.appendChild(bx);
+      }
       sec.appendChild(head);
       var body = el('div', 'lcbk-list');
       if (!list.length) body.appendChild(el('p', 'lcbk-empty', q ? 'Nada com esse filtro' : 'Nada aqui'));
