@@ -474,7 +474,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-10-26';
+  var VERSAO = '2026-11-10c';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -3164,7 +3164,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     // (um vendedor em Acompanhar l\u00ea s\u00f3 o hist\u00f3rico das solicita\u00e7\u00f5es dele).
     var rt = 'ihavepermission';
     if (est !== PROD && LC.base) { try { rt = new URL(LC.base).searchParams.get('reportType') || rt; } catch (e) { /* ignora */ } }
-    var q = 'reportType=' + encodeURIComponent(rt) + '&taskStatus=S&flowStatus=' + flowStatus +
+    var q = 'reportType=' + encodeURIComponent(rt) + '&taskStatus=' + ((est && est.taskStatus) || 'S') + '&flowStatus=' + flowStatus +
       '&codFlowsOrServices=' + encodeURIComponent(fluxo[0] + ';' + fluxo[1] + ';0;0') +
       '&startBegin=' + encodeURIComponent(ddmmaaaa(ini)) + '&startEnd=' + encodeURIComponent(ddmmaaaa(fim)) + (extra || '');
     (est || PROD).consultas++;
@@ -3505,22 +3505,36 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var ini = new Date(P.de.getTime() - FIN_CFG.janelaDias * DIA), acc = [];
     var enc = '&endBegin=' + encodeURIComponent(ddmmaaaa(P.de)) + '&endEnd=' + encodeURIComponent(ddmmaaaa(hoje));
     var fila = [];
-    fluxosNegociacao().forEach(function (f) { fila.push([f, 'S', '']); fila.push([f, 'N', enc]); });
+    // negocia\u00e7\u00f5es em andamento: tarefas finalizadas (S) e tamb\u00e9m as em aberto (N), para pegar quem est\u00e1 parado na etapa de pagamento
+    fluxosNegociacao().forEach(function (f) { fila.push([f, 'S', '', 'S']); fila.push([f, 'S', '', 'N']); fila.push([f, 'N', enc, 'S']); });
     var i = 0;
     (function prox() {
       if (i >= fila.length) return fim();
       var t = fila[i++];
       FIN.prog = 'Lendo o log de tarefas (' + i + ' de ' + fila.length + ')\u2026';
       renderInst();
-      baixarRecorte(t[0], t[1], ini, hoje, t[2], acc, FIN).then(prox, function (e) { FIN.erro = (e && e.message) || 'erro'; fim(); });
+      FIN.taskStatus = t[3];
+      baixarRecorte(t[0], t[1], ini, hoje, t[2], acc, FIN).then(prox, function (e) {
+        if (t[3] === 'N') return prox();                    // se o Zeev n\u00e3o aceitar "em aberto", segue s\u00f3 com as finalizadas
+        FIN.erro = (e && e.message) || 'erro'; fim();
+      });
     })();
     function fim() {
       var ate1 = new Date(P.ate.getTime() + DIA), pag = {}, ass = {}, val = {};
+      FIN.diagPag = null;
       FIN.nomesPago = {}; FIN.nomesAss = {};
       acc.forEach(function (x) {
         if (!x.sol) return;
         // Etapa de pagamento (ex.: "T28-Auditar Pagamento"): a negocia\u00e7\u00e3o CHEGA nela quando o fundo paga.
         // Data = a 1\u00aa chegada (recebimento) da tarefa, finalizada ou n\u00e3o.
+        if (FIN_CFG.tarefaPago.test(x.nome || '')) {
+          var dg = FIN.diagPag || (FIN.diagPag = { n: 0, andamento: 0, semData: 0, min: null, max: null, sols: {} });
+          dg.n++; dg.sols[x.sol] = 1;
+          if (!x.fin) dg.andamento++;
+          var dd = x.rec || x.fin;
+          if (!dd) dg.semData++;
+          else { if (!dg.min || dd < dg.min) dg.min = dd; if (!dg.max || dd > dg.max) dg.max = dd; }
+        }
         if (FIN_CFG.tarefaPago.test(x.nome || '') && (x.rec || x.fin)) {
           FIN.nomesPago[x.nome] = (FIN.nomesPago[x.nome] || 0) + 1;
           var dP = x.rec || x.fin;
@@ -3677,6 +3691,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     notas.push('Crit\u00e9rio: ' + conta('campo') + ' pela data do pagamento no formul\u00e1rio \u00b7 ' + conta('pagamento') + ' pela tarefa de pagamento \u00b7 ' +
       conta('assinatura') + ' por assinatura validada (com n\u00ba de proposta)');
     notas.push('Tarefas de pagamento no log: ' + (nP.length ? nP.join(' \u00b7 ') : 'nenhuma'));
+    var dg = FIN.diagPag;
+    if (dg) notas.push('Etapa de pagamento: ' + dg.n + ' registro(s) em ' + Object.keys(dg.sols).length + ' negocia\u00e7\u00e3o(\u00f5es), ' + dg.andamento + ' em andamento, ' +
+      dg.semData + ' sem data' + (dg.min ? ', chegadas de ' + ddmmaaaa(dg.min) + ' a ' + ddmmaaaa(dg.max) : ''));
     notas.push('Tarefas de assinatura no log: ' + (nA.length ? nA.join(' \u00b7 ') : 'nenhuma'));
     if (!FORM.em) notas.push('Aguarde "lendo valores das negocia\u00e7\u00f5es\u2026": o crit\u00e9rio das assinaturas depende do formul\u00e1rio.');
     if (linhas.some(function (l) { return !l.temForm; })) notas.push('Linhas em cinza: valores do formul\u00e1rio ainda n\u00e3o lidos.');
