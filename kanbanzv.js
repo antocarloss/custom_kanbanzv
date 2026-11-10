@@ -3518,11 +3518,15 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var ate1 = new Date(P.ate.getTime() + DIA), pag = {}, ass = {}, val = {};
       FIN.nomesPago = {}; FIN.nomesAss = {};
       acc.forEach(function (x) {
-        if (!x.sol || !x.fin) return;
-        if (FIN_CFG.tarefaPago.test(x.nome || '')) {
+        if (!x.sol) return;
+        // Etapa de pagamento (ex.: "T28-Auditar Pagamento"): a negocia\u00e7\u00e3o CHEGA nela quando o fundo paga.
+        // Data = a 1\u00aa chegada (recebimento) da tarefa, finalizada ou n\u00e3o.
+        if (FIN_CFG.tarefaPago.test(x.nome || '') && (x.rec || x.fin)) {
           FIN.nomesPago[x.nome] = (FIN.nomesPago[x.nome] || 0) + 1;
-          if (!pag[x.sol] || x.fin > pag[x.sol]) pag[x.sol] = x.fin;           // \u00faltima finaliza\u00e7\u00e3o
+          var dP = x.rec || x.fin;
+          if (!pag[x.sol] || dP < pag[x.sol]) pag[x.sol] = dP;
         }
+        if (!x.fin) return;
         if (FIN_CFG.tarefaAssinatura.test(x.nome || '')) {
           FIN.nomesAss[x.nome] = (FIN.nomesAss[x.nome] || 0) + 1;
           if (!ass[x.sol] || x.fin > ass[x.sol]) ass[x.sol] = x.fin;
