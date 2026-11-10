@@ -9,6 +9,51 @@
  * Seguran\u00e7a: s\u00f3 GET no mesmo dom\u00ednio, nenhum token, nada de dado de lead gravado no navegador,
  * nenhum conte\u00fado da tela vira HTML (s\u00f3 textContent).
  */
+// \u2550\u2550\u2550 TENTATIVAS DE CONTATO \u2014 ajudante do formul\u00e1rio \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// A tabela "Registrar Tentativa de Contato" tem v\u00e1rias linhas, e o export do Zeev n\u00e3o traz tabelas.
+// Se o formul\u00e1rio tiver os campos simples abaixo (criados pelo admin), este ajudante mant\u00e9m:
+//   qtdTentativasContato*        = quantas tentativas est\u00e3o preenchidas na tabela
+//   dataUltimaTentativaContato*  = data e hora (dd/mm/aaaa hh:mm) da \u00faltima tentativa registrada
+// S\u00f3 escreve nesses dois campos; n\u00e3o mexe em nada mais do formul\u00e1rio.
+(function () {
+  'use strict';
+  if (window.__lcbTentativas) return;
+  window.__lcbTentativas = true;
+  var SEL = 'select[data-name^="tentativaDeContato"], input[data-name^="tentativaDeContato"]';
+  function campo(prefixo) { return document.querySelector('[data-name^="' + prefixo + '"]'); }
+  function definir(el, v) {
+    if (!el || el.value === v) return;
+    el.value = v;
+    ['input', 'change'].forEach(function (t) { try { el.dispatchEvent(new Event(t, { bubbles: true })); } catch (e) { /* ignora */ } });
+  }
+  function agora() {
+    var d = new Date(), z = function (n) { return (n < 10 ? '0' : '') + n; };
+    return z(d.getDate()) + '/' + z(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + z(d.getHours()) + ':' + z(d.getMinutes());
+  }
+  function contar() {
+    var n = 0;
+    [].forEach.call(document.querySelectorAll(SEL), function (s) { if (String(s.value || '').trim()) n++; });
+    return n;
+  }
+  function atualizar(registrou) {
+    var q = campo('qtdTentativasContato');
+    if (!q && !campo('dataUltimaTentativaContato')) return;
+    var n = contar();
+    definir(q, String(n));
+    if (registrou) definir(campo('dataUltimaTentativaContato'), agora());
+  }
+  document.addEventListener('change', function (e) {
+    var t = e.target;
+    if (t && t.matches && t.matches(SEL)) atualizar(!!String(t.value || '').trim());
+  }, true);
+  document.addEventListener('click', function (e) {            // Inserir / Excluir linha da tabela
+    if (e.target && e.target.closest && e.target.closest('table') && document.querySelector(SEL)) setTimeout(function () { atualizar(false); }, 400);
+  }, true);
+  var ini = function () { if (document.querySelector(SEL)) atualizar(false); };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ini); else ini();
+  setTimeout(ini, 1500);
+})();
+
 (function () {
   'use strict';
   if (window.__lcbKanban) return;
@@ -67,6 +112,7 @@
       // PPP com o vendedor: campo "Tentativas de contato" (no resumo do Zeev). 0 = Novo; 1 a 4 = Tentativa de
       // contato; a partir deste n\u00famero (ou texto "sem sucesso") = Contato sem sucesso.
       tentativasSemSucesso: 5,
+      tentativaIntervaloH: 2,     // o diretor quer uma tentativa a cada 2 horas
       formal: 'T24',              // Filho: chegou na T24 = fechado formalmente (data de recebimento da T24)
       sdr: ['Raphisa'],
       // Perdida "pelo jur\u00eddico" = a negocia\u00e7\u00e3o passou por uma destas tarefas (reprova\u00e7\u00e3o):
@@ -921,6 +967,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   function chipTipo(tags, info) {
     if (info && info.tipo) tags.appendChild(el('span', 'lcbk-chip is-ativo', info.tipo));
+    if (info && info.tentUlt) {
+      var hU = (Date.now() - info.tentUlt) / 3600000, lim = CFG.producao.tentativaIntervaloH;
+      var tx = hU < 1 ? '\u00faltima h\u00e1 ' + Math.max(1, Math.round(hU * 60)) + ' min' : hU < 48 ? '\u00faltima h\u00e1 ' + Math.floor(hU) + 'h' : '\u00faltima h\u00e1 ' + Math.floor(hU / 24) + ' dias';
+      var cu = el('span', 'lcbk-chip is-tent' + (hU >= lim ? ' is-esg' : ''), tx);
+      cu.title = '\u00daltima tentativa de contato: ' + new Date(info.tentUlt).toLocaleString('pt-BR') + (hU >= lim ? ' \u2014 passou de ' + lim + 'h' : '');
+      tags.appendChild(cu);
+    }
     if (info && info.tentTxt) {
       var nT = parseInt(digits(info.tentTxt) || '0', 10);
       tags.appendChild(el('span', 'lcbk-chip is-tent' + (nT >= CFG.producao.tentativasSemSucesso ? ' is-esg' : ''),
@@ -2788,7 +2841,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       itens: LC.completo.itens.map(function (it) { var c = {}; for (var k in it) if (k !== 'tr') c[k] = it[k]; return c; }),
       funil: LC.completo.funil || '',
       em: LC.completo.em, total: LC.completo.total,
-      form: FORM.base === base ? { porSol: FORM.porSol, em: FORM.em } : null,
+      form: FORM.base === base ? { porSol: FORM.porSol, em: FORM.em, v: FORM_VERSAO, tent: TEM_TENTATIVAS } : null,
       perda: PERDA.porSol ? { porSol: PERDA.porSol, em: PERDA.em } : null
     };
     abrirCache().then(function (db) {
@@ -2817,7 +2870,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var agora = new Date();
       p2.itens.forEach(function (it) { if (it.ativo && it.due && it.due.date) it.late = it.due.date < agora; });
       LC.completo = { base: base, itens: p2.itens, em: new Date(p2.em), total: p2.total, daCopia: true, funil: p2.funil || '', periodo: periodoEfetivo() };
-      if (p2.form && !FORM.em) { FORM.porSol = p2.form.porSol; FORM.em = new Date(p2.form.em); FORM.base = base; }
+      if (p2.form && !FORM.em && p2.form.v === FORM_VERSAO) { FORM.porSol = p2.form.porSol; FORM.em = new Date(p2.form.em); FORM.base = base; if (p2.form.tent) TEM_TENTATIVAS = true; }
       if (p2.perda && !PERDA.porSol) { PERDA.porSol = p2.perda.porSol; PERDA.em = new Date(p2.perda.em); }
       renderInst();
       setTimeout(function () { if (!LC.carregando) carregarTudo(); }, 300);   // atualiza em segundo plano
@@ -2857,7 +2910,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         if (it.ativo && it.due && it.due.date) it.late = it.due.date < agora;
       });
       LC.completo = { base: base, itens: p2.itens, em: new Date(p2.em), total: p2.total, daCopia: true };
-      if (p2.form && !FORM.em) { FORM.porSol = p2.form.porSol; FORM.em = new Date(p2.form.em); FORM.base = base; }
+      if (p2.form && !FORM.em && p2.form.v === FORM_VERSAO) { FORM.porSol = p2.form.porSol; FORM.em = new Date(p2.form.em); FORM.base = base; if (p2.form.tent) TEM_TENTATIVAS = true; }
       if (p2.perda && !PERDA.porSol) { PERDA.porSol = p2.perda.porSol; PERDA.em = new Date(p2.perda.em); }
       renderInst();
       setTimeout(function () { if (!LC.carregando) carregarTudo(); }, 300);   // atualiza em segundo plano
@@ -3074,6 +3127,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   function moedaBR(n) { return 'R$ ' + Math.round(n).toLocaleString('pt-BR'); }
   var FORM = { porSol: {}, carregando: false, erro: '', em: null, base: '', incompleto: 0 };
+  var FORM_VERSAO = 3;                                         // muda quando a leitura do formul\u00e1rio ganha campos novos
   function lerFormCsv(txt, por) {
     var linhas = lerCsv(txt);
     if (!linhas.length) return 0;
@@ -3180,12 +3234,20 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       o.statusCom = semDoc(pega(r, ['statusComercial', 'statusDoComercial', 'situacaoComercial', 'statusDaNegociacao']));
       // Tentativas de contato: tabela do formul\u00e1rio (uma linha por tentativa, at\u00e9 5). O export pode trazer
       // as linhas juntas ("1\u00aa Tentativa; 2\u00aa Tentativa") \u2014 conta as linhas e o maior n\u00famero escolhido.
-      var tTxt = '';
+      var tTxt = '', tQtd = '', tUlt = '';
       h.forEach(function (nome, k) {
+        var v = clean(r[k]);
+        if (/^qtdTentativasContato/i.test(nome)) { TEM_TENTATIVAS = true; if (v) tQtd = v; return; }
+        if (/^dataUltimaTentativaContato/i.test(nome)) { if (v) tUlt = v; return; }
         if (!/^tentativaDeContato/i.test(nome)) return;
         TEM_TENTATIVAS = true;                                  // o formul\u00e1rio tem o campo
-        if (clean(r[k])) tTxt += (tTxt ? ';' : '') + clean(r[k]);
+        if (v) tTxt += (tTxt ? ';' : '') + v;
       });
+      if (tQtd && !tTxt) tTxt = tQtd;
+      if (tUlt) {
+        var mU = tUlt.match(/(\d{2})\/(\d{2})\/(\d{4})(?:\D+(\d{1,2}):(\d{2}))?/);
+        if (mU) o.tentUlt = new Date(+mU[3], +mU[2] - 1, +mU[1], +(mU[4] || 0), +(mU[5] || 0)).getTime();
+      }
       if (tTxt) {
         var partes = tTxt.split(/[;|\n\r]+|,(?=\s*\d)/).map(clean).filter(Boolean), maxN = 0, semSuc = false;
         partes.forEach(function (x) {
@@ -3372,6 +3434,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     inf.motJur = f.motJur; inf.motCli = f.motCli; inf.pend = f.pend;
     if (f.solic) inf.dono = f.solic;
     if (f.tent && !inf.tentTxt) inf.tentTxt = f.tent;
+    if (f.tentUlt) inf.tentUlt = f.tentUlt;
     if (f.statusCom && !inf.statusCom) inf.statusCom = f.statusCom;
   }
 
