@@ -1576,6 +1576,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-mtz-h{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;margin-bottom:8px}',
       '.lcbk-mtz-h strong{font-size:15px;color:#1b2f5c}',
       '.lcbk-mtz-h span{font-size:12px;color:#6b778c}',
+      '.lcbk-mtz-h .lcbk-mtz-tg{margin-left:auto}',
+      '.lcbk-mtz-box.is-min{padding:8px 14px}',
+      '.lcbk-mtz-box.is-min .lcbk-mtz-h{margin:0;align-items:center}',
       '.lcbk-mtz-sc{overflow-x:auto}',
       '.lcbk-mtz{border-collapse:collapse;width:100%;font-size:12.5px;min-width:900px}',
       '.lcbk-mtz th,.lcbk-mtz td{padding:6px 8px;border-bottom:1px solid #eef0f4;text-align:left;white-space:nowrap}',
@@ -1992,8 +1995,33 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (it.tipo === 'filho' && inf.dono) return inf.dono;
     return it.fila ? 'Na fila (sem dono)' : (it.quem || 'Sem dono');
   }
+  function botaoMatriz(oculta) {
+    var b = el('button', 'lcbk-btn lcbk-mtz-tg', oculta ? 'Mostrar status por vendedor' : 'Ocultar tabela');
+    b.type = 'button';
+    b.title = oculta ? 'Mostrar a tabela de status comercial por vendedor' : 'Esconder a tabela e ver o Kanban completo';
+    b.setAttribute('aria-expanded', oculta ? 'false' : 'true');
+    b.addEventListener('click', function () { ls('lcbKanbanMatriz', oculta ? 'on' : 'off'); renderInst(); });
+    return b;
+  }
   function desenharMatriz(lista) {
     if (!uiI.matriz) return;
+    if (ls('lcbKanbanMatriz') === 'off') {                        // tabela recolhida: s\u00f3 uma faixa fina
+      var mini = el('div', 'lcbk-mtz-box is-min');
+      var hm = el('div', 'lcbk-mtz-h');
+      hm.appendChild(el('strong', null, 'Status comercial por vendedor'));
+      if (stInst.vend) {
+        hm.appendChild(el('span', null, 'Mostrando: ' + stInst.vend));
+        var tudo = el('button', 'lcbk-btn', 'Todos os vendedores');
+        tudo.type = 'button';
+        tudo.addEventListener('click', function () { stInst.vend = ''; stInst.etapa = ''; renderInst(); });
+        hm.appendChild(tudo);
+      }
+      hm.appendChild(botaoMatriz(true));
+      mini.appendChild(hm);
+      uiI.matriz.replaceChildren(mini);
+      uiI.matriz.style.display = '';
+      return;
+    }
     var por = {}, tot = {};
     lista.forEach(function (it) {
       var st = statusComercial(it);
@@ -2034,6 +2062,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     h.appendChild(el('strong', null, 'Status comercial por vendedor'));
     h.appendChild(el('span', null, stInst.vend ? 'Mostrando: ' + stInst.vend + (stInst.etapa ? ' \u00b7 ' + (ST_COM.filter(function (s) { return 'st_' + s[0] === stInst.etapa; })[0] || [0, ''])[1] : '') + ' (clique em "Todos os vendedores" para voltar)'
       : 'Clique num vendedor ou num n\u00famero para abrir as negocia\u00e7\u00f5es no quadro'));
+    h.appendChild(botaoMatriz(false));
     box.appendChild(h);
     var sc = el('div', 'lcbk-mtz-sc'); sc.appendChild(t); box.appendChild(sc);
     uiI.matriz.replaceChildren(box);
