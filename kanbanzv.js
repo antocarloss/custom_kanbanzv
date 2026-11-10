@@ -1979,6 +1979,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   // \u00e9 deduzido da etapa (regras abaixo), at\u00e9 o campo ser criado no fluxo.
   var ST_COM = [
     ['ppf', 'PPF (proposta futura)', 'lead com proposta futura, aberto neste m\u00eas'],
+    ['ppp', 'PPP (negociar compra)', 'lead com o vendedor, aberto neste m\u00eas'],
     ['novo', 'Novo', 'contato distribu\u00eddo, ainda n\u00e3o trabalhado'],
     ['tentativa', 'Tentativa de contato', 'cliente ainda n\u00e3o respondeu (m\u00edn. 5 tentativas)'],
     ['semsucesso', 'Contato sem sucesso', 'tentativas sem retorno (PPP de meses anteriores)'],
@@ -2023,8 +2024,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       if (colunaDe('triagem', it) !== 'ppp') return '';
       var pt = statusPorTentativas(inf);
       if (pt) return pt;                                        // campo preenchido pelo vendedor manda
-      if (!doMes(it)) return 'semsucesso';
-      return it.late ? 'tentativa' : 'novo';
+      if (!doMes(it)) return 'semsucesso';                      // PPP de meses anteriores
+      return 'ppp';                                             // PPP do m\u00eas (mesma coluna da triagem)
     }
     if (!it.ativo) {                                            // negocia\u00e7\u00e3o perdida
       if (!PERDA.porSol && !PERDA.carregando && !PERDA.erro && listaPronta()) setTimeout(carregarMotivosPerda, 0);
