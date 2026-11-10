@@ -924,7 +924,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (info && info.tentTxt) {
       var nT = parseInt(digits(info.tentTxt) || '0', 10);
       tags.appendChild(el('span', 'lcbk-chip is-tent' + (nT >= CFG.producao.tentativasSemSucesso ? ' is-esg' : ''),
-        /\d/.test(info.tentTxt) ? 'Tentativas: ' + nT + ' de ' + CFG.producao.tentativasSemSucesso : 'Tentativas: ' + info.tentTxt));
+        /\d/.test(info.tentTxt) ? 'Tentativas: ' + Math.min(nT, CFG.producao.tentativasSemSucesso) + ' de ' + CFG.producao.tentativasSemSucesso : 'Tentativas: ' + info.tentTxt));
     }
     if (info && info.pagoFin) tags.appendChild(el('span', 'lcbk-chip is-pago', 'Pago (financeiro)'));
     else if (info && info.pagoZeev) tags.appendChild(el('span', 'lcbk-chip is-pago', 'Comprovante no Zeev'));
@@ -1615,6 +1615,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-motivo.is-pend{color:#7a4b00;background:#fff4e0}',
       '.lcbk-chip.is-tent{background:#eef2fb;color:#1b2f5c}',
       '.lcbk-chip.is-tent.is-esg{background:#fbeceb;color:#8f241c}',
+      '.lcbk-chip.is-tent.is-zero{background:#FFF4F5;color:#8B0E22;box-shadow:inset 0 0 0 1px #F3C6CE}',
       '.lcbk-chip.is-pago{background:#e3f4ea;color:#1f5e3b;font-weight:600}',
       '.lcbk-exp{border:1px solid #c9cfda;background:#fff;color:#1b2f5c;font-family:inherit;font-size:11px;font-weight:600;border-radius:6px;padding:3px 8px;margin-left:6px;cursor:pointer}',
       '.lcbk-exp:hover{background:#eef2f9}',
@@ -2010,6 +2011,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     return '';
   }
   // Tentativas de contato (campo preenchido pelo vendedor): Novo / Tentativa / Sem sucesso
+  var TEM_TENTATIVAS = false;
   function statusPorTentativas(inf) {
     if (inf.tentTxt == null || inf.tentTxt === '') return '';
     var t = lower(inf.tentTxt);
@@ -2927,6 +2929,12 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var tags = el('div', 'lcbk-tags');
     tags.appendChild(el('span', 'lcbk-tipo is-' + it.tipo, NOME_TIPO[it.tipo] || NOME_TIPO.pai));
     chipTipo(tags, it.info);
+    if (TEM_TENTATIVAS && it.tipo === 'filho' && it.ativo && !(it.info && it.info.tentTxt) && !(it.info && it.info.propN) &&
+        /^T01(\.01)?$/.test(codigoDe(it.atividade))) {
+      var z = el('span', 'lcbk-chip is-tent is-zero', 'Tentativas: 0 de ' + CFG.producao.tentativasSemSucesso);
+      z.title = 'Nenhuma tentativa de contato registrada nesta negocia\u00e7\u00e3o';
+      tags.appendChild(z);
+    }
     if (it.ativo && it.stage && it.stage !== 'outros' && !(it._col && it._col.unica) &&
         !(it.tipo !== 'filho' && it.stage === 'triagem')) {
       tags.appendChild(el('span', 'lcbk-chip', NOME_ETAPA[it.stage] || it.stage));
@@ -3170,6 +3178,22 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       o.motCli = corta(pega(r, F.motivoCliente));
       o.solic = semDoc(pega(r, ['Solicitante / Nome']));
       o.statusCom = semDoc(pega(r, ['statusComercial', 'statusDoComercial', 'situacaoComercial', 'statusDaNegociacao']));
+      // Tentativas de contato: tabela do formul\u00e1rio (uma linha por tentativa, at\u00e9 5). O export pode trazer
+      // as linhas juntas ("1\u00aa Tentativa; 2\u00aa Tentativa") \u2014 conta as linhas e o maior n\u00famero escolhido.
+      var tTxt = '';
+      h.forEach(function (nome, k) {
+        if (!/^tentativaDeContato/i.test(nome)) return;
+        TEM_TENTATIVAS = true;                                  // o formul\u00e1rio tem o campo
+        if (clean(r[k])) tTxt += (tTxt ? ';' : '') + clean(r[k]);
+      });
+      if (tTxt) {
+        var partes = tTxt.split(/[;|\n\r]+|,(?=\s*\d)/).map(clean).filter(Boolean), maxN = 0, semSuc = false;
+        partes.forEach(function (x) {
+          var m = x.match(/\d+/); if (m) maxN = Math.max(maxN, parseInt(m[0], 10));
+          if (/sem sucesso/i.test(x)) semSuc = true;
+        });
+        o.tent = semSuc ? 'sem sucesso' : String(Math.max(maxN, partes.length));
+      }
       var pend = [];
       F.pendencias.forEach(function (nome) { var k = ix(nome); if (k >= 0 && clean(r[k]) && pend.length < 2 && pend.indexOf(clean(r[k])) === -1) pend.push(clean(r[k])); });
       o.pend = corta(pend.join(' \u00b7 '));
@@ -3347,6 +3371,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     inf.pagoZeev = !!f.comprovante;
     inf.motJur = f.motJur; inf.motCli = f.motCli; inf.pend = f.pend;
     if (f.solic) inf.dono = f.solic;
+    if (f.tent && !inf.tentTxt) inf.tentTxt = f.tent;
     if (f.statusCom && !inf.statusCom) inf.statusCom = f.statusCom;
   }
 
