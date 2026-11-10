@@ -64,6 +64,9 @@
       // Uma negocia\u00e7\u00e3o com uma dessas propostas vai para Fechados (PAGO), em qualquer etapa.
       propostasPagas: ['1863', '1864', '1865', '1866', '1867', '1870', '1873', '1874', '1875',
                        '3717', '3752', '3787', '3791', '3795'],
+      // PPP com o vendedor: campo "Tentativas de contato" (no resumo do Zeev). 0 = Novo; 1 a 4 = Tentativa de
+      // contato; a partir deste n\u00famero (ou texto "sem sucesso") = Contato sem sucesso.
+      tentativasSemSucesso: 5,
       formal: 'T24',              // Filho: chegou na T24 = fechado formalmente (data de recebimento da T24)
       sdr: ['Raphisa'],
       // Perdida "pelo jur\u00eddico" = a negocia\u00e7\u00e3o passou por uma destas tarefas (reprova\u00e7\u00e3o):
@@ -918,6 +921,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   function chipTipo(tags, info) {
     if (info && info.tipo) tags.appendChild(el('span', 'lcbk-chip is-ativo', info.tipo));
+    if (info && info.tentTxt) {
+      var nT = parseInt(digits(info.tentTxt) || '0', 10);
+      tags.appendChild(el('span', 'lcbk-chip is-tent' + (nT >= CFG.producao.tentativasSemSucesso ? ' is-esg' : ''),
+        /\d/.test(info.tentTxt) ? 'Tentativas: ' + nT + ' de ' + CFG.producao.tentativasSemSucesso : 'Tentativas: ' + info.tentTxt));
+    }
     if (info && info.pagoFin) tags.appendChild(el('span', 'lcbk-chip is-pago', 'Pago (financeiro)'));
     else if (info && info.pagoZeev) tags.appendChild(el('span', 'lcbk-chip is-pago', 'Comprovante no Zeev'));
   }
@@ -929,6 +937,145 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     b.style.setProperty('--lcbk-alt', Math.max(320, Math.round(window.innerHeight - topo - 70)) + 'px');
   }
   window.addEventListener('resize', function () { ajustarAltura(ui && ui.board); ajustarAltura(uiI && uiI.board); });
+
+  // \u2550\u2550\u2550 TEMA LCbank (Manual Geral V1.0) \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+  var TEMA_LCBANK = [
+    ':root{--lcb-marinho:#003050;--lcb-petroleo:#004065;--lcb-indigo:#030094;--lcb-royal:#020381;--lcb-noite:#040F37;--lcb-eletrico:#182EFF;--lcb-vermelho:#C8102E;--lcb-vermelho2:#FF002A;--lcb-bordo:#8B0E22;--lcb-ciano:#D4FFFE;--lcb-superficie:#F5F7FA;--lcb-grafite:#222222;--lcb-linha:#E3E7EE;--lcb-apoio:#5B6B7F;--lcb-t:"Outfit","Montserrat",system-ui,sans-serif;--lcb-c:"Karla","Lato",system-ui,sans-serif}',
+    /* barra de filtros: painel de controle */
+    '.lcbk-bar{background:#fff;border:1px solid var(--lcb-linha);border-radius:12px;padding:10px 12px;margin:0 0 12px;gap:8px}',
+    '.lcbk-tools{gap:8px}',
+    '.lcbk-select,.lcbk-search{font-family:var(--lcb-c);font-size:14px;color:var(--lcb-grafite);background:#fff;border:1px solid var(--lcb-linha);border-radius:8px;min-height:36px;padding:6px 10px}',
+    '.lcbk-select:hover,.lcbk-search:hover{border-color:#C9D2DE}',
+    '.lcbk-seg,.lcbk-btn{font-family:var(--lcb-t);font-weight:500;font-size:13.5px;color:var(--lcb-marinho);background:#fff;border:1px solid var(--lcb-linha);border-radius:8px;min-height:36px;padding:6px 12px;transition:background .15s,border-color .15s,color .15s}',
+    '.lcbk-seg:hover,.lcbk-btn:hover{border-color:var(--lcb-marinho);background:#F8FAFC}',
+    '.lcbk-seg.is-on{background:var(--lcb-marinho);color:#fff;border-color:var(--lcb-marinho)}',
+    '.lcbk-btn.is-on,.lcbk-comigo.is-on{background:var(--lcb-marinho);border-color:var(--lcb-marinho);color:#fff}',
+    '.lcbk-seg:focus-visible,.lcbk-btn:focus-visible,.lcbk-select:focus-visible,.lcbk-search:focus-visible,.lcbk-card:focus-visible{outline:2px solid var(--lcb-eletrico);outline-offset:2px}',
+    '.lcbk-select:focus,.lcbk-search:focus{border-color:var(--lcb-eletrico);box-shadow:0 0 0 3px rgba(24,46,255,.12);outline:none}',
+    '.lcbk-check{font-family:var(--lcb-c);font-size:14px;color:var(--lcb-grafite)}',
+    '.lcbk-status{font-family:var(--lcb-c);font-size:12.5px;color:var(--lcb-apoio)}',
+    '.lcbk-aviso{font-family:var(--lcb-c);font-size:13.5px;color:var(--lcb-noite);background:var(--lcb-ciano);border:0;border-left:3px solid var(--lcb-petroleo);border-radius:8px;padding:9px 12px}',
+    /* distribui\u00e7\u00e3o de trabalho (pessoas e filas) */
+    '.lcbk-resumo{gap:8px;padding:0 0 12px}',
+    '.lcbk-pessoa{font-family:var(--lcb-c);background:#fff;border:1px solid var(--lcb-linha);border-radius:10px;padding:8px 12px;min-width:170px;box-shadow:none;transition:border-color .15s,background .15s}',
+    '.lcbk-pessoa:hover{border-color:var(--lcb-marinho)}',
+    '.lcbk-pessoa strong{font-family:var(--lcb-t);font-weight:700;color:var(--lcb-marinho);font-size:14px}',
+    '.lcbk-pessoa .lcbk-time{font-family:var(--lcb-t);font-weight:500;letter-spacing:.06em;font-size:10.5px;color:var(--lcb-petroleo)}',
+    '.lcbk-pessoa.is-on{border-color:var(--lcb-eletrico);box-shadow:inset 0 0 0 1px var(--lcb-eletrico);background:#F7F8FF}',
+    '.lcbk-pessoa.is-fila{background:#FFF7F8;border:1px dashed var(--lcb-vermelho)}',
+    '.lcbk-pessoa.is-fila .lcbk-time{color:var(--lcb-vermelho)}',
+    '.lcbk-pessoa .is-stuck{color:var(--lcb-vermelho);font-weight:700}',
+    /* quadro e colunas */
+    '.lcbk-on .lcbk-board{gap:14px}',
+    '.lcbk-board.is-loading{position:relative}',
+    '.lcbk-board.is-loading::before{content:"";position:absolute;left:0;right:0;top:-6px;height:3px;border-radius:2px;background:linear-gradient(90deg,transparent,var(--lcb-eletrico),transparent);background-size:40% 100%;background-repeat:no-repeat;animation:lcbkCarga 1.2s linear infinite}',
+    '@keyframes lcbkCarga{from{background-position:-40% 0}to{background-position:140% 0}}',
+    '.lcbk-col{background:var(--lcb-superficie);border:1px solid var(--lcb-linha);border-top:0;border-radius:12px;box-shadow:none;position:relative;overflow:hidden}',
+    '.lcbk-col::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:var(--lcbk-cor,var(--lcb-marinho))}',
+    '.lcbk-col.is-alert,.lcbk-col.is-ok{background:var(--lcb-superficie)}',
+    '.lcbk-head{background:#fff;border-bottom:1px solid var(--lcb-linha);padding:14px 14px 10px;align-items:flex-start}',
+    '.lcbk-head h3{font-family:var(--lcb-t);font-weight:700;font-size:13px;letter-spacing:.05em;text-transform:uppercase;color:var(--lcb-marinho)}',
+    '.lcbk-head small{font-family:var(--lcb-c);font-size:12px;color:var(--lcb-apoio)}',
+    '.lcbk-count{font-family:var(--lcb-t);font-weight:800;font-size:24px;line-height:1;color:var(--lcbk-cor,var(--lcb-marinho));background:none;padding:0;min-width:0}',
+    '.lcbk-soma{font-family:var(--lcb-c)!important;font-weight:500!important;font-size:12.5px!important;color:var(--lcb-grafite)!important}',
+    '.lcbk-soma.is-prop{color:var(--lcb-marinho)!important;font-weight:700!important}',
+    '.lcbk-ind{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}',
+    '.lcbk-ind-x{font-family:var(--lcb-c);font-weight:700;font-size:11.5px;border-radius:999px;padding:2px 8px}',
+    '.lcbk-ind-x.is-atr{background:#FDECEF;color:var(--lcb-vermelho)}',
+    '.lcbk-ind-x.is-hoje{background:#FFF4F5;color:var(--lcb-bordo);border:1px solid #F3C6CE}',
+    '.lcbk-ind-x.is-fila{background:#EEF1F6;color:var(--lcb-petroleo)}',
+    '.lcbk-exp{font-family:var(--lcb-t);font-weight:500;border-color:var(--lcb-linha);color:var(--lcb-marinho);border-radius:8px}',
+    '.lcbk-exp:hover{border-color:var(--lcb-marinho);background:#F8FAFC}',
+    '.lcbk-list{padding:10px}',
+    '.lcbk-empty{font-family:var(--lcb-c);font-size:13px;color:var(--lcb-apoio)}',
+    /* cards */
+    '.lcbk-card{font-family:var(--lcb-c);background:#fff;border:1px solid var(--lcb-linha);border-left:1px solid var(--lcb-linha);border-radius:10px;padding:12px 13px;box-shadow:0 1px 2px rgba(4,15,55,.04);transition:border-color .15s,box-shadow .15s,transform .15s}',
+    '.lcbk-card:hover{border-color:#C9D2DE;box-shadow:0 6px 18px rgba(0,48,80,.08);transform:translateY(-1px)}',
+    '.lcbk-card.is-late,.lcbk-card.is-today{border-left:3px solid var(--lcb-vermelho)}',
+    '.lcbk-card.is-done{opacity:.92}',
+    '.lcbk-top{align-items:center;margin-bottom:4px}',
+    '.lcbk-num{font-family:var(--lcb-c);font-weight:500;font-size:12.5px;color:var(--lcb-apoio);font-variant-numeric:tabular-nums}',
+    '.lcbk-flag{font-family:var(--lcb-t);font-weight:500;font-size:11px;letter-spacing:.02em;border-radius:999px;padding:2px 8px;background:#EEF1F6;color:var(--lcb-petroleo)}',
+    '.lcbk-flag.is-late{background:var(--lcb-vermelho);color:#fff}',
+    '.lcbk-flag.is-today{background:#fff;color:var(--lcb-vermelho);box-shadow:inset 0 0 0 1px var(--lcb-vermelho)}',
+    '.lcbk-flag.is-avencer{background:#EEF0FF;color:var(--lcb-indigo)}',
+    '.lcbk-flag.is-semprazo{background:#F1F3F6;color:var(--lcb-apoio)}',
+    '.lcbk-flag.is-stuck{background:#FFF4F5;color:var(--lcb-bordo)}',
+    '.lcbk-flag.is-done{background:#F1F3F6;color:var(--lcb-apoio)}',
+    '.lcbk-flag.is-lost{background:#FDECEF;color:var(--lcb-bordo)}',
+    '.lcbk-title{font-family:var(--lcb-t);font-weight:700;font-size:15px;line-height:1.25;color:var(--lcb-marinho);margin:2px 0 3px}',
+    '.lcbk-app{font-family:var(--lcb-c);font-size:12.5px;color:var(--lcb-apoio)}',
+    '.lcbk-atv{font-size:13.5px;color:var(--lcb-grafite);font-weight:500}',
+    '.lcbk-cli{font-family:var(--lcb-t);font-weight:700;color:var(--lcb-marinho)}',
+    '.lcbk-proc{font-family:var(--lcb-c);font-size:12.5px;color:var(--lcb-apoio)}',
+    '.lcbk-proc strong,.lcbk-cpf{font-family:var(--lcb-c);font-weight:700;color:var(--lcb-grafite);font-variant-numeric:tabular-nums}',
+    '.lcbk-info{background:var(--lcb-superficie);border:1px solid #EDF0F5;border-radius:8px;padding:8px 10px;font-family:var(--lcb-c);font-size:13px}',
+    '.lcbk-info dt{color:var(--lcb-apoio);font-weight:500}',
+    '.lcbk-info dd.is-face{color:var(--lcb-grafite);font-weight:700}',
+    '.lcbk-info dd.is-valor{color:var(--lcb-petroleo);font-weight:700}',
+    '.lcbk-info dd.is-vazio{color:var(--lcb-apoio);font-style:normal;font-weight:400}',
+    '.lcbk-tags{gap:5px;margin-top:8px}',
+    '.lcbk-chip,.lcbk-tipo{font-family:var(--lcb-c);font-weight:700;font-size:11.5px;border-radius:6px;padding:2px 8px;border:0}',
+    '.lcbk-tipo{background:#EAF0F6;color:var(--lcb-marinho)}',
+    '.lcbk-tipo.is-pai{background:#EAF0F6;color:var(--lcb-marinho)}',
+    '.lcbk-tipo.is-filho{background:#EEF0FF;color:var(--lcb-indigo)}',
+    '.lcbk-tipo.is-relacionamento{background:var(--lcb-ciano);color:var(--lcb-petroleo)}',
+    '.lcbk-chip{background:#F1F3F6;color:var(--lcb-petroleo)}',
+    '.lcbk-chip.is-ativo{background:#FFF4F5;color:var(--lcb-bordo)}',
+    '.lcbk-chip.is-pago{background:var(--lcb-ciano);color:var(--lcb-petroleo)}',
+    '.lcbk-chip.is-tent{background:#EEF0FF;color:var(--lcb-indigo)}',
+    '.lcbk-chip.is-tent.is-esg{background:#FDECEF;color:var(--lcb-vermelho)}',
+    '.lcbk-chip.is-area{background:#F1F3F6;color:var(--lcb-apoio)}',
+    '.lcbk-motivo{font-family:var(--lcb-c);font-size:12.5px;background:#FFF4F5;color:var(--lcb-bordo);border-radius:8px}',
+    '.lcbk-motivo.is-pend{background:var(--lcb-ciano);color:var(--lcb-petroleo)}',
+    '.lcbk-foot{margin-top:8px;padding-top:8px;border-top:1px solid #EEF1F5;font-family:var(--lcb-c);font-size:12.5px;color:var(--lcb-apoio)}',
+    '.lcbk-due{font-weight:500;color:var(--lcb-grafite)}',
+    '.is-late .lcbk-due{color:var(--lcb-vermelho);font-weight:700}',
+    '.is-today .lcbk-due{color:var(--lcb-vermelho);font-weight:700}',
+    '.lcbk-who{color:var(--lcb-apoio)}',
+    '.lcbk-mais{font-family:var(--lcb-t);font-weight:500;color:var(--lcb-eletrico)}',
+    /* vis\u00e3o do diretor e painel do gestor: mesma tipografia */
+    '.lcbk-mtz-box,.lcbk-painel{border-color:var(--lcb-linha)}',
+    '.lcbk-mtz-h strong,.lcbk-g-head h2,.lcbk-painel-head h2{font-family:var(--lcb-t);color:var(--lcb-marinho)}',
+    '.lcbk-mtz{font-family:var(--lcb-c)}',
+    '.lcbk-mtz thead th{font-family:var(--lcb-t);font-weight:500;color:var(--lcb-petroleo)}',
+    '.lcbk-mtz td.st-recusada:not(.is-zero),.lcbk-mtz td.st-recusou:not(.is-zero),.lcbk-mtz td.st-fora:not(.is-zero){color:var(--lcb-vermelho)}',
+    '.lcbk-mtz td.st-pago:not(.is-zero),.lcbk-mtz td.st-aceita:not(.is-zero){color:var(--lcb-petroleo)}',
+    '.lcbk-voltar{font-family:var(--lcb-t);background:var(--lcb-marinho)}',
+    '.lcbk-voltar:hover{background:var(--lcb-petroleo)}'
+  ].join('\n');
+  // Tipografia do Manual LCbank V1.0: Outfit (t\u00edtulos, n\u00fameros, bot\u00f5es) e Karla (dados e textos).
+  // Arquivos do pacote @fontsource, vers\u00e3o fixa, com integridade conferida (SRI).
+  var FONTES_MARCA = [
+    ['outfit', '500', 'sha384-RnPLG9al+0CXZrRGYpsCgD4TJYAi+wbUKWhQaj2J3fDBVfyDGmhf+JUMbxpte1uW'],
+    ['outfit', '700', 'sha384-jfZHc8vNiGq0peahdyf918biYu6BEGGkcmoZiC0qc/kOSAP2JdN/EjrBk7u6KmyW'],
+    ['outfit', '800', 'sha384-9PlP4JFR3ZNIjthrfIlQ0k4fw6jdY32rkUIy+UikL0Sw5tAffEMPHwcG+mnTPt6d'],
+    ['karla', '400', 'sha384-wwHJpWYjstl//Gh07uuI7HSlvkbOnNHhoHf/BCQY38gschMWiio7dYX2NBNO9tHl'],
+    ['karla', '500', 'sha384-Bk3xU895W1en3No6Xn+5ItIRvFjddxheNskCeGTGH2DNASymI6sWHjXaiVJEuf19'],
+    ['karla', '700', 'sha384-AvmWtd76pipKqEV4FDQZGZlnCBOLHDlVIVXNLeqRZ3BMuxaehvlVuFxoUtFwiraR']
+  ];
+  function carregarFontesMarca() {
+    if (document.getElementById('lcbk-fontes')) return;
+    var marca = document.createElement('meta'); marca.id = 'lcbk-fontes'; document.head.appendChild(marca);
+    FONTES_MARCA.forEach(function (f) {
+      var l = document.createElement('link');
+      l.rel = 'stylesheet';
+      l.href = 'https://cdn.jsdelivr.net/npm/@fontsource/' + f[0] + '@5.2.8/latin-' + f[1] + '.css';
+      l.integrity = f[2]; l.crossOrigin = 'anonymous'; l.referrerPolicy = 'no-referrer';
+      document.head.appendChild(l);
+    });
+  }
+  // cor de identifica\u00e7\u00e3o da coluna (linha superior), conforme o manual: n\u00e3o pinta a coluna inteira
+  var COR_COLUNA = {
+    triagem: '#003050', acompanhar: '#004065', ppf: '#030094', ppp: '#182EFF', negociacao: '#182EFF',
+    proposta: '#030094', pendencias: '#020381', fecCom: '#004065', cessao: '#020381', fechados: '#003050',
+    documentacao: '#003050', analise: '#004065', reprovacao: '#C8102E', contrato: '#030094', video: '#020381', pos: '#003050'
+  };
+  function corDaColuna(c, i) {
+    if (COR_COLUNA[c.id]) return COR_COLUNA[c.id];
+    if (c.alert) return '#C8102E';
+    return ['#003050', '#004065', '#030094', '#182EFF', '#020381'][i % 5];
+  }
 
   function botaoMais(resto, onClick) {
     var b = el('button', 'lcbk-btn lcbk-mais',
@@ -1223,6 +1370,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (document.getElementById('lcbk-css')) return;
     var s = el('style');
     s.id = 'lcbk-css';
+    carregarFontesMarca();
     s.textContent = [
       '.lcbk-on .crud-list-table{display:none!important}',
       '.lcbk-on .lcbk-oculto{display:none!important}',
@@ -1418,15 +1566,37 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-soma.is-prop{color:#1b2f5c!important}',
       '.lcbk-motivo{margin-top:6px;font-size:11.5px;line-height:1.35;color:#a1281f;background:#fbeceb;border-radius:6px;padding:6px 8px}',
       '.lcbk-motivo.is-pend{color:#7a4b00;background:#fff4e0}',
+      '.lcbk-chip.is-tent{background:#eef2fb;color:#1b2f5c}',
+      '.lcbk-chip.is-tent.is-esg{background:#fbeceb;color:#8f241c}',
       '.lcbk-chip.is-pago{background:#e3f4ea;color:#1f5e3b;font-weight:600}',
       '.lcbk-exp{border:1px solid #c9cfda;background:#fff;color:#1b2f5c;font-family:inherit;font-size:11px;font-weight:600;border-radius:6px;padding:3px 8px;margin-left:6px;cursor:pointer}',
       '.lcbk-exp:hover{background:#eef2f9}',
       '.lcbk-exp:disabled{opacity:.6;cursor:wait}',
+      '.lcbk-mtz-box{background:#fff;border:1px solid #e3e6ec;border-radius:12px;padding:12px 14px;margin:0 0 12px}',
+      '.lcbk-mtz-h{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;margin-bottom:8px}',
+      '.lcbk-mtz-h strong{font-size:15px;color:#1b2f5c}',
+      '.lcbk-mtz-h span{font-size:12px;color:#6b778c}',
+      '.lcbk-mtz-sc{overflow-x:auto}',
+      '.lcbk-mtz{border-collapse:collapse;width:100%;font-size:12.5px;min-width:900px}',
+      '.lcbk-mtz th,.lcbk-mtz td{padding:6px 8px;border-bottom:1px solid #eef0f4;text-align:left;white-space:nowrap}',
+      '.lcbk-mtz thead th{font-size:11.5px;color:#5e6c84;font-weight:600;border-bottom:2px solid #e3e6ec}',
+      '.lcbk-mtz td.num{text-align:center;font-variant-numeric:tabular-nums;font-weight:600;cursor:pointer}',
+      '.lcbk-mtz td.num:hover{background:#eef2f9}',
+      '.lcbk-mtz td.is-zero{color:#c4cad4;font-weight:400;cursor:default}',
+      '.lcbk-mtz td.is-zero:hover{background:none}',
+      '.lcbk-mtz .mtz-nome{cursor:pointer;color:#1b2f5c;font-weight:600}',
+      '.lcbk-mtz .mtz-nome:hover{text-decoration:underline}',
+      '.lcbk-mtz tr.is-on td,.lcbk-mtz tr.is-on .mtz-nome{background:#eef6ff}',
+      '.lcbk-mtz tr.is-tot td,.lcbk-mtz tr.is-tot th{border-top:2px solid #e3e6ec;background:#f7f8fb}',
+      '.lcbk-mtz td.st-pago:not(.is-zero),.lcbk-mtz td.st-aceita:not(.is-zero){color:#1f5e3b}',
+      '.lcbk-mtz td.st-recusada:not(.is-zero),.lcbk-mtz td.st-recusou:not(.is-zero),.lcbk-mtz td.st-fora:not(.is-zero){color:#a1281f}',
+      '.lcbk-mtz td.mtz-t{color:#172b4d;cursor:default}',
       '.lcbk-mais{width:100%;margin-top:4px;background:#fff}',
       '.lcbk-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#404857;cursor:pointer}',
       '.lcbk-chip.is-area{background:#f1f2f5;color:#404857}',
       '@media (max-width:768px){.lcbk-on .lcbk-board{grid-template-columns:repeat(var(--lcbk-cols,4),82vw)}.lcbk-status{margin-left:0}}',
-      '@media (prefers-reduced-motion:reduce){.lcbk-card{transition:none}}'
+      '@media (prefers-reduced-motion:reduce){.lcbk-card{transition:none}}',
+      TEMA_LCBANK
     ].join('\n');
     document.head.appendChild(s);
   }
@@ -1627,6 +1797,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       if (!info.tipo && R.tipo.test(r)) { info.tipo = v; return; }
       if (!info.desq && /desqualifica/.test(r)) { info.desq = v; return; }
       if (!info.viab && /^viabilidade/.test(r)) { info.viab = v; return; }
+      if (!info.statusCom && /^status (comercial|do comercial|da negocia)/.test(r)) { info.statusCom = v; return; }
+      if (info.tentTxt == null && /tentativa/.test(r)) { info.tentTxt = clean(p.valor); return; }
       if (/n[u\u00fa]mero/.test(r)) return;                       // "n\u00famero da proposta" n\u00e3o \u00e9 valor
       for (var i = 0; i < R.propostas.length; i++) {
         if (R.propostas[i][0].test(r) && /\d/.test(v)) { props.push({ ordem: i, valor: moeda(v), rotulo: R.propostas[i][1] }); break; }
@@ -1755,6 +1927,118 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     return it.ativo && it.tipo !== 'filho' && it.inicioEm && it.inicioEm < inicioDoMes() && colunaDe('triagem', it) === etapa;
   }
   var MESES = { cols: [] };
+  // \u2550\u2550\u2550 VIS\u00c3O DO DIRETOR COMERCIAL (status comercial por vendedor) \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+  // Se a negocia\u00e7\u00e3o tiver o campo "Status Comercial" no Zeev, ele manda. Sem o campo, o status
+  // \u00e9 deduzido da etapa (regras abaixo), at\u00e9 o campo ser criado no fluxo.
+  var ST_COM = [
+    ['novo', 'Novo', 'contato distribu\u00eddo, ainda n\u00e3o trabalhado'],
+    ['tentativa', 'Tentativa de contato', 'cliente ainda n\u00e3o respondeu (m\u00edn. 5 tentativas)'],
+    ['semsucesso', 'Contato sem sucesso', 'tentativas sem retorno (PPP de meses anteriores)'],
+    ['negociacao', 'Em negocia\u00e7\u00e3o', 'em contato com o cliente para negociar'],
+    ['aceita', 'Proposta aceita', 'aceitou e enviou os documentos'],
+    ['pago', 'Fechado (PAGO)', 'na T24 ou depois, ou pago pelo financeiro'],
+    ['recusada', 'Proposta recusada', 'sem interesse pelo pre\u00e7o'],
+    ['recusou', 'Recusou negociar', 'sem interesse em receber proposta'],
+    ['fora', 'Fora do par\u00e2metro', 'processo fora dos par\u00e2metros de aquisi\u00e7\u00e3o']
+  ];
+  function statusPorTexto(t) {
+    t = lower(t || '');
+    if (!t) return '';
+    if (/fora do par/.test(t)) return 'fora';
+    if (/recusou/.test(t)) return 'recusou';
+    if (/proposta recusada|recusad/.test(t)) return 'recusada';
+    if (/aceit/.test(t)) return 'aceita';
+    if (/sem sucesso/.test(t)) return 'semsucesso';
+    if (/tentativa/.test(t)) return 'tentativa';
+    if (/negocia/.test(t)) return 'negociacao';
+    if (/novo/.test(t)) return 'novo';
+    if (/pag|cess/.test(t)) return 'pago';
+    return '';
+  }
+  // Tentativas de contato (campo preenchido pelo vendedor): Novo / Tentativa / Sem sucesso
+  function statusPorTentativas(inf) {
+    if (inf.tentTxt == null || inf.tentTxt === '') return '';
+    var t = lower(inf.tentTxt);
+    if (/sem sucesso/.test(t)) return 'semsucesso';
+    var n = parseInt(digits(inf.tentTxt) || '0', 10);
+    if (n >= CFG.producao.tentativasSemSucesso) return 'semsucesso';
+    return n > 0 ? 'tentativa' : 'novo';
+  }
+  function statusComercial(it) {
+    var inf = it.info || {}, cod = codigoDe(it.atividade);
+    if (it.tipo === 'filho' && (pagoConfirmado(it) || noFormal(it) || it.stage === 'pos' || (!it.ativo && !perdida(it)))) return 'pago';
+    var doCampo = statusPorTexto(inf.statusCom);
+    if (doCampo) return doCampo;
+    if (it.tipo !== 'filho') {                                 // lead (Pai) no PPP, com o vendedor
+      if (!it.ativo || colunaDe('triagem', it) !== 'ppp') return '';
+      var pt = statusPorTentativas(inf);
+      if (pt) return pt;                                        // campo preenchido pelo vendedor manda
+      if (!doMes(it)) return 'semsucesso';
+      return it.late ? 'tentativa' : 'novo';
+    }
+    if (!it.ativo) {                                            // negocia\u00e7\u00e3o perdida
+      if (!PERDA.porSol && !PERDA.carregando && !PERDA.erro && listaPronta()) setTimeout(carregarMotivosPerda, 0);
+      if (PERDA.porSol && PERDA.porSol[it.num] === 'juridico') return 'fora';
+      return inf.propN ? 'recusada' : 'recusou';
+    }
+    if (it.stage === 'cessao' || CFG.producao.posAceite.indexOf(cod) !== -1) return 'aceita';
+    if ((cod === 'T01' || cod === 'T01.01') && !inf.propN && statusPorTentativas(inf)) return statusPorTentativas(inf);
+    if (cod === 'T01.01') return 'tentativa';
+    if (cod === 'T01' && !inf.propN) return it.late ? 'tentativa' : 'novo';
+    return 'negociacao';
+  }
+  function donoDe(it) {
+    var inf = it.info || {};
+    if (it.tipo === 'filho' && inf.dono) return inf.dono;
+    return it.fila ? 'Na fila (sem dono)' : (it.quem || 'Sem dono');
+  }
+  function desenharMatriz(lista) {
+    if (!uiI.matriz) return;
+    var por = {}, tot = {};
+    lista.forEach(function (it) {
+      var st = statusComercial(it);
+      if (!st) return;
+      var d = donoDe(it), r = por[d] || (por[d] = { nome: d, n: 0 });
+      r[st] = (r[st] || 0) + 1; r.n++; tot[st] = (tot[st] || 0) + 1;
+    });
+    var linhas = Object.keys(por).map(function (k) { return por[k]; }).sort(function (a, b) { return b.n - a.n; });
+    var t = el('table', 'lcbk-mtz'), th = el('tr');
+    th.appendChild(el('th', null, 'Vendedor'));
+    ST_COM.forEach(function (s) { var c = el('th', 'st-' + s[0], s[1]); c.title = s[2]; th.appendChild(c); });
+    th.appendChild(el('th', null, 'Total'));
+    var thead = el('thead'); thead.appendChild(th); t.appendChild(thead);
+    var tb = el('tbody');
+    var linha = function (r, ehTotal) {
+      var tr = el('tr', (ehTotal ? 'is-tot' : '') + (!ehTotal && stInst.vend === r.nome ? ' is-on' : ''));
+      var n = el(ehTotal ? 'th' : 'td', 'mtz-nome', ehTotal ? 'Todos os vendedores' : r.nome);
+      n.title = ehTotal ? 'Mostrar todos' : 'Ver s\u00f3 ' + r.nome;
+      n.addEventListener('click', function () { stInst.vend = ehTotal || stInst.vend === r.nome ? '' : r.nome; stInst.etapa = ''; renderInst(); });
+      tr.appendChild(n);
+      ST_COM.forEach(function (s) {
+        var v = r[s[0]] || 0, td = el('td', 'num st-' + s[0] + (v ? '' : ' is-zero'), v ? fmtN(v) : '\u00b7');
+        if (v) {
+          td.title = (ehTotal ? 'Todos' : r.nome) + ' \u00b7 ' + s[1];
+          td.addEventListener('click', function () { stInst.vend = ehTotal ? '' : r.nome; stInst.etapa = 'st_' + s[0]; renderInst(); });
+        }
+        tr.appendChild(td);
+      });
+      tr.appendChild(el('td', 'num mtz-t', fmtN(r.n)));
+      return tr;
+    };
+    linhas.forEach(function (r) { tb.appendChild(linha(r, false)); });
+    var T = { nome: '', n: 0 }; ST_COM.forEach(function (s) { T[s[0]] = tot[s[0]] || 0; T.n += T[s[0]]; });
+    tb.appendChild(linha(T, true));
+    t.appendChild(tb);
+    var box = el('div', 'lcbk-mtz-box');
+    var h = el('div', 'lcbk-mtz-h');
+    h.appendChild(el('strong', null, 'Status comercial por vendedor'));
+    h.appendChild(el('span', null, stInst.vend ? 'Mostrando: ' + stInst.vend + (stInst.etapa ? ' \u00b7 ' + (ST_COM.filter(function (s) { return 'st_' + s[0] === stInst.etapa; })[0] || [0, ''])[1] : '') + ' (clique em "Todos os vendedores" para voltar)'
+      : 'Clique num vendedor ou num n\u00famero para abrir as negocia\u00e7\u00f5es no quadro'));
+    box.appendChild(h);
+    var sc = el('div', 'lcbk-mtz-sc'); sc.appendChild(t); box.appendChild(sc);
+    uiI.matriz.replaceChildren(box);
+    uiI.matriz.style.display = '';
+  }
   function layoutPorMes(nome, etapa) {
     return {
       nome: nome,
@@ -1864,6 +2148,17 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     comercial: layoutEsteiraInst('comercial'),
     juridico: layoutEsteiraInst('juridico'),
     triagem: layoutEsteiraInst('triagem'),
+    diretor: {
+      nome: 'Vis\u00e3o do diretor comercial (status por vendedor)',
+      esteira: 'comercial',
+      cols: function () {
+        return ST_COM.map(function (s) {
+          return { id: 'st_' + s[0], name: s[1], dica: s[2], ok: s[0] === 'pago' || s[0] === 'aceita',
+                   alert: ['recusada', 'recusou', 'fora'].indexOf(s[0]) !== -1, encerrada: ['pago', 'recusada', 'recusou', 'fora'].indexOf(s[0]) !== -1 };
+        }).concat([{ id: 'outros', name: 'Outras \u00e1reas', opcional: true, outras: true }]);
+      },
+      place: function (it) { var st = statusComercial(it); return st ? 'st_' + st : 'outros'; }
+    },
     inatividade: layoutPorMes('Inatividade (PPP de meses anteriores)', 'ppp'),
     relnovos: layoutPorMes('Relacionamento Novos (PPF de meses anteriores)', 'ppf'),
     rejeitados: {
@@ -2117,6 +2412,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function modoNecessario() {
     if (LC.completo && LC.completo.daCopia && !totalZeev()) return LC.completo.funil || '';   // p\u00e1gina ainda sem total
     var lay = layoutInstAtivo();
+    if (lay === 'diretor') lay = 'comercial';                       // usa o mesmo funil da esteira comercial
     if ((lay !== 'comercial' && lay !== 'juridico' && lay !== 'inatividade' && lay !== 'relnovos') || !LC.url) return '';
     if (new URL(LC.url).searchParams.get('codFlowsOrServices')) return '';
     if (lay === 'inatividade' || lay === 'relnovos') {                 // s\u00f3 o Pai em andamento
@@ -2524,8 +2820,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var top = el('div', 'lcbk-top');
     top.appendChild(el('span', 'lcbk-num', it.numero));
     var flag = !it.ativo ? [(it.resultado && it.resultado !== it.status ? it.resultado : it.status) || 'Encerrada', perdida(it) ? 'is-lost' : 'is-done'] :
-      it.late ? ['Atrasada', ''] : it.today ? ['Vence hoje', 'is-today'] :
-      it.fila ? ['Na fila', 'is-stuck'] : null;
+      it.late ? ['Atrasada', 'is-late'] : it.today ? ['Vence hoje', 'is-today'] :
+      it.fila ? ['Na fila', 'is-stuck'] : it.due && it.due.date ? ['A vencer', 'is-avencer'] : ['Sem prazo', 'is-semprazo'];
     if (flag) top.appendChild(el('span', 'lcbk-flag ' + flag[1], flag[0]));
     c.appendChild(top);
     c.appendChild(el('div', 'lcbk-title', it.titulo));
@@ -2564,6 +2860,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     outras: ls('lcbKanbanOutras') === '1',
     ator: '',
     etapa: '',
+    vend: '',
     periodo: ls('lcbKanbanPeriodo') || '',
     comigo: false,
     lim: {},
@@ -2775,6 +3072,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var corta = function (t) { t = semDoc(t); return t.length > 220 ? t.slice(0, 217) + '\u2026' : t; };
       o.motJur = corta(pega(r, F.motivoJuridico));
       o.motCli = corta(pega(r, F.motivoCliente));
+      o.solic = semDoc(pega(r, ['Solicitante / Nome']));
+      o.statusCom = semDoc(pega(r, ['statusComercial', 'statusDoComercial', 'situacaoComercial', 'statusDaNegociacao']));
       var pend = [];
       F.pendencias.forEach(function (nome) { var k = ix(nome); if (k >= 0 && clean(r[k]) && pend.length < 2 && pend.indexOf(clean(r[k])) === -1) pend.push(clean(r[k])); });
       o.pend = corta(pend.join(' \u00b7 '));
@@ -2951,6 +3250,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     inf.pagoFin = (f.props || []).some(function (n) { return pagas.indexOf(n) !== -1; });
     inf.pagoZeev = !!f.comprovante;
     inf.motJur = f.motJur; inf.motCli = f.motCli; inf.pend = f.pend;
+    if (f.solic) inf.dono = f.solic;
+    if (f.statusCom && !inf.statusCom) inf.statusCom = f.statusCom;
   }
 
   var PERDA = { porSol: null, carregando: false, erro: '', em: null, consultas: 0, incompleto: 0 };
@@ -3362,7 +3663,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     // s\u00f3 entram processos em etapas do jur\u00eddico (a menos que "Mostrar outras \u00e1reas" esteja marcado).
     var foraDaArea = 0, foraDoTime = 0;
     var buscando = !!stInst.busca;
-    if ((layoutId === 'comercial' || layoutId === 'juridico') && lidos.some(function (it) { return it.tipo === 'filho'; })) {
+    if ((layoutId === 'comercial' || layoutId === 'juridico' || layoutId === 'diretor') && lidos.some(function (it) { return it.tipo === 'filho'; })) {
       var velhoF = !FORM.em || FORM.base !== LC.base || Date.now() - FORM.em.getTime() > 10 * 60000;
       if (velhoF && !FORM.carregando && listaPronta() && !(FORM.erro && FORM.base === LC.base)) setTimeout(carregarFormularios, 0);
     }
@@ -3403,6 +3704,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     });
     if (stInst.ator && !atores[stInst.ator]) stInst.ator = '';
     var itens = stInst.ator && !semRecorte ? todos.filter(function (it) { return chaveAtor(it) === stInst.ator; }) : todos;
+    if (layoutId === 'diretor') {
+      desenharMatriz(todos);
+      if (stInst.vend) itens = itens.filter(function (it) { return donoDe(it) === stInst.vend; });
+    } else if (uiI.matriz) uiI.matriz.style.display = 'none';
     if (layoutId === 'inatividade' || layoutId === 'relnovos') {        // colunas = meses de entrada, do mais antigo ao atual
       var etapaM = L.etapa, contM = {};
       lidos.forEach(function (it) { if (antigoNa(it, etapaM)) contM[mesChave(it.inicioEm)] = 1; });
@@ -3420,7 +3725,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       REJ.cols = Object.keys(cont).sort(function (a, b) { return cont[b] - cont[a]; })
         .map(function (k) { return { id: k, name: nomeM[k], alert: true, encerrada: true }; });
     }
-    var cols = L.cols(), buckets = {}, q = stInst.busca.toLowerCase(), ocultos = 0, achados = 0;
+    var cols = L.cols(), buckets = {}, q = stInst.busca.toLowerCase(), ocultos = 0, achados = 0, iColCor = 0;
     // filtro de etapa: op\u00e7\u00f5es = colunas da esteira atual
     if (uiI.fEtapa) {
       var opE = [['', 'Etapa: todas']].concat(cols.filter(function (c) { return c.id !== 'outros'; }).map(function (c) { return [c.id, c.name]; }));
@@ -3464,6 +3769,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       if (c.opcional && !list.length) return;
       if (semRecorte && !list.length) return;                          // na busca e no "Comigo", s\u00f3 colunas com cards
       var sec = el('section', 'lcbk-col' + (c.alert ? ' is-alert' : '') + (c.ok ? ' is-ok' : ''));
+      sec.style.setProperty('--lcbk-cor', corDaColuna(c, iColCor++));
+      sec.setAttribute('data-col', c.id);
       var head = el('header', 'lcbk-head');
       var h = el('div');
       h.appendChild(el('h3', null, c.name));
@@ -3493,6 +3800,15 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       }
       head.appendChild(h);
       head.appendChild(el('span', 'lcbk-count', fmtN(n)));
+      var nAtr = 0, nHoje = 0, nFila = 0;
+      list.forEach(function (it) { if (it.ativo) { if (it.late) nAtr++; else if (it.today) nHoje++; if (it.fila) nFila++; } });
+      if (nAtr || nHoje || nFila) {
+        var ind = el('div', 'lcbk-ind');
+        if (nAtr) ind.appendChild(el('span', 'lcbk-ind-x is-atr', fmtN(nAtr) + (nAtr === 1 ? ' atrasado' : ' atrasados')));
+        if (nHoje) ind.appendChild(el('span', 'lcbk-ind-x is-hoje', fmtN(nHoje) + (nHoje === 1 ? ' vence hoje' : ' vencem hoje')));
+        if (nFila) ind.appendChild(el('span', 'lcbk-ind-x is-fila', fmtN(nFila) + ' sem respons\u00e1vel'));
+        h.appendChild(ind);
+      }
       if (list.length) {
         var bx = el('button', 'lcbk-exp', 'Exportar');
         bx.type = 'button';
@@ -3519,6 +3835,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       frag.appendChild(sec);
     });
     uiI.board.replaceChildren(frag);
+    uiI.board.classList.toggle('is-loading', !!LC.carregando);
     if (buscando && !achados) {
       uiI.board.appendChild(el('p', 'lcbk-busca-vazia', LB.carregando && LB.q === stInst.busca
         ? 'Procurando "' + stInst.busca + '" em todas as solicita\u00e7\u00f5es que voc\u00ea pode ver no Zeev\u2026'
@@ -3579,7 +3896,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     });
     uiI.resumo.replaceChildren(box);
     var verResumo = ls('lcbKanbanResumo') !== 'off';
-    uiI.resumo.style.display = verResumo && stInst.view === 'kanban' && lista.length && !(EH_GESTOR && stInst.painel) ? '' : 'none';
+    uiI.resumo.style.display = verResumo && stInst.view === 'kanban' && lista.length && !(EH_GESTOR && stInst.painel) && layoutInstAtivo() !== 'diretor' ? '' : 'none';
     if (uiI.btnResumo) {
       uiI.btnResumo.style.display = stInst.view === 'kanban' && lista.length && !(EH_GESTOR && stInst.painel) ? '' : 'none';
       uiI.btnResumo.textContent = verResumo ? 'Ocultar pessoas' : 'Mostrar pessoas';
@@ -3819,6 +4136,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     uiI.aviso = el('p', 'lcbk-aviso');
     uiI.aviso.setAttribute('role', 'status');
     uiI.resumo = el('div');
+    uiI.matriz = el('div');
+    uiI.matriz.style.display = 'none';
     uiI.painel = el('section', 'lcbk-painel');
     uiI.painel.setAttribute('aria-label', 'Vis\u00e3o do gestor');
     uiI.board = el('div', 'lcbk-board');
@@ -3826,6 +4145,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     container.parentNode.insertBefore(uiI.painel, container);
     container.parentNode.insertBefore(uiI.aviso, container);
     container.parentNode.insertBefore(uiI.resumo, container);
+    container.parentNode.insertBefore(uiI.matriz, container);
     container.parentNode.insertBefore(uiI.board, container.nextSibling);
   }
 
