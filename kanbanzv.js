@@ -979,6 +979,12 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     '.lcbk-count{font-family:var(--lcb-t);font-weight:800;font-size:24px;line-height:1;color:var(--lcbk-cor,var(--lcb-marinho));background:none;padding:0;min-width:0}',
     '.lcbk-soma{font-family:var(--lcb-c)!important;font-weight:500!important;font-size:12.5px!important;color:var(--lcb-grafite)!important}',
     '.lcbk-soma.is-prop{color:var(--lcb-marinho)!important;font-weight:700!important}',
+    '.lcbk-head>div{min-width:0;flex:1}',
+    '.lcbk-head h3{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}',
+    '.lcbk-dica{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+    '.lcbk-soma{display:flex!important;justify-content:space-between;gap:6px;white-space:nowrap;font-size:12px!important;line-height:1.45}',
+    '.lcbk-soma .l{overflow:hidden;text-overflow:ellipsis;min-width:0}',
+    '.lcbk-soma .v{flex:none;font-variant-numeric:tabular-nums}',
     '.lcbk-ind{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}',
     '.lcbk-ind-x{font-family:var(--lcb-c);font-weight:700;font-size:11.5px;border-radius:999px;padding:2px 8px}',
     '.lcbk-ind-x.is-atr{background:#FDECEF;color:var(--lcb-vermelho)}',
@@ -1610,7 +1616,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-mtz-h .lcbk-mtz-tg{margin-left:auto}',
       '.lcbk-mtz-box.is-min{padding:8px 14px}',
       '.lcbk-mtz-box.is-min .lcbk-mtz-h{margin:0;align-items:center}',
-      '.lcbk-mtz-sc{overflow:auto;max-height:34vh}',
+      '.lcbk-mtz-sc{overflow:auto;max-height:30vh}',
       '.lcbk-mtz thead th{position:sticky;top:0;background:#fff;z-index:1}',
       '.lcbk-mtz tr.is-tot td,.lcbk-mtz tr.is-tot th{position:sticky;bottom:0;z-index:1}',
       '.lcbk-mtz{border-collapse:collapse;width:100%;font-size:12.5px;min-width:900px}',
@@ -2044,20 +2050,20 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     b.type = 'button';
     b.title = oculta ? 'Mostrar a tabela de status comercial por vendedor' : 'Esconder a tabela e ver o Kanban completo';
     b.setAttribute('aria-expanded', oculta ? 'false' : 'true');
-    b.addEventListener('click', function () { ls('lcbKanbanMatriz', oculta ? 'on' : 'off'); renderInst(); });
+    b.addEventListener('click', function () { stInst.mtzAuto = false; ls('lcbKanbanMatriz', oculta ? 'on' : 'off'); renderInst(); });
     return b;
   }
   function desenharMatriz(lista) {
     if (!uiI.matriz) return;
-    if (ls('lcbKanbanMatriz') === 'off') {                        // tabela recolhida: s\u00f3 uma faixa fina
+    if (ls('lcbKanbanMatriz') === 'off' || stInst.mtzAuto) {      // tabela recolhida: s\u00f3 uma faixa fina
       var mini = el('div', 'lcbk-mtz-box is-min');
       var hm = el('div', 'lcbk-mtz-h');
       hm.appendChild(el('strong', null, 'Status comercial por vendedor'));
       if (stInst.vend) {
-        hm.appendChild(el('span', null, 'Mostrando: ' + stInst.vend));
+        hm.appendChild(el('span', null, 'Mostrando: ' + stInst.vend + (stInst.etapa ? ' \u00b7 ' + ((ST_COM.filter(function (x) { return 'st_' + x[0] === stInst.etapa; })[0] || [0, ''])[1]) : '')));
         var tudo = el('button', 'lcbk-btn', 'Todos os vendedores');
         tudo.type = 'button';
-        tudo.addEventListener('click', function () { stInst.vend = ''; stInst.etapa = ''; renderInst(); });
+        tudo.addEventListener('click', function () { stInst.vend = ''; stInst.etapa = ''; stInst.mtzAuto = false; renderInst(); });
         hm.appendChild(tudo);
       }
       hm.appendChild(botaoMatriz(true));
@@ -2073,7 +2079,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var d = donoDe(it), r = por[d] || (por[d] = { nome: d, n: 0 });
       r[st] = (r[st] || 0) + 1; r.n++; tot[st] = (tot[st] || 0) + 1;
     });
-    var linhas = Object.keys(por).map(function (k) { return por[k]; }).sort(function (a, b) { return b.n - a.n; });
+    var semDono = function (n) { return /^(na fila|sem dono)/i.test(n); };
+    var linhas = Object.keys(por).map(function (k) { return por[k]; })
+      .sort(function (a, b) { return (semDono(a.nome) - semDono(b.nome)) || (b.n - a.n); });
     var t = el('table', 'lcbk-mtz'), th = el('tr');
     th.appendChild(el('th', null, 'Vendedor'));
     ST_COM.forEach(function (s) { var c = el('th', 'st-' + s[0], s[1]); c.title = s[2]; th.appendChild(c); });
@@ -2084,13 +2092,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var tr = el('tr', (ehTotal ? 'is-tot' : '') + (!ehTotal && stInst.vend === r.nome ? ' is-on' : ''));
       var n = el(ehTotal ? 'th' : 'td', 'mtz-nome', ehTotal ? 'Todos os vendedores' : r.nome);
       n.title = ehTotal ? 'Mostrar todos' : 'Ver s\u00f3 ' + r.nome;
-      n.addEventListener('click', function () { stInst.vend = ehTotal || stInst.vend === r.nome ? '' : r.nome; stInst.etapa = ''; renderInst(); irParaQuadro(); });
+      n.addEventListener('click', function () { stInst.vend = ehTotal || stInst.vend === r.nome ? '' : r.nome; stInst.etapa = ''; stInst.mtzAuto = !!stInst.vend; renderInst(); irParaQuadro(); });
       tr.appendChild(n);
       ST_COM.forEach(function (s) {
         var v = r[s[0]] || 0, td = el('td', 'num st-' + s[0] + (v ? '' : ' is-zero'), v ? fmtN(v) : '\u00b7');
         if (v) {
           td.title = (ehTotal ? 'Todos' : r.nome) + ' \u00b7 ' + s[1];
-          td.addEventListener('click', function () { stInst.vend = ehTotal ? '' : r.nome; stInst.etapa = 'st_' + s[0]; renderInst(); irParaQuadro(); });
+          td.addEventListener('click', function () { stInst.vend = ehTotal ? '' : r.nome; stInst.etapa = 'st_' + s[0]; stInst.mtzAuto = true; renderInst(); irParaQuadro(); });
         }
         tr.appendChild(td);
       });
@@ -3884,9 +3892,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         sm2.appendChild(usar);
         h.appendChild(sm2);
       } else if (c.dica != null) {
-        if (c.dica) h.appendChild(el('small', null, c.dica));
-        if (somaFace) h.appendChild(el('small', 'lcbk-soma', 'Valor de Face: ' + moedaBR(somaFace)));
-        if (somaProp || somaFace) h.appendChild(el('small', 'lcbk-soma is-prop', 'Valor de Desembolso: ' + moedaBR(somaProp)));
+        if (c.dica) { var dc = el('small', 'lcbk-dica', c.dica); dc.title = c.dica; h.appendChild(dc); }
+        var somaEl = function (cls, rot, v) {
+          var e = el('small', 'lcbk-soma' + cls); e.title = rot + ': ' + v;
+          e.appendChild(el('span', 'l', rot)); e.appendChild(el('span', 'v', v)); return e;
+        };
+        if (somaFace) h.appendChild(somaEl('', 'Valor de Face', moedaBR(somaFace)));
+        if (somaProp || somaFace) h.appendChild(somaEl(' is-prop', 'Valor de Desembolso', moedaBR(somaProp)));
       }
       head.appendChild(h);
       head.appendChild(el('span', 'lcbk-count', fmtN(n)));
