@@ -1094,12 +1094,17 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   var ULT_ROLAGEM = 0;
   document.addEventListener('scroll', function (e) {
     var t = e.target;
-    if (t && t.classList && (t.classList.contains('lcbk-list') || t.classList.contains('lcbk-board'))) ULT_ROLAGEM = Date.now();
+    if (t && t.classList && (t.classList.contains('lcbk-list') || t.classList.contains('lcbk-board') || t.classList.contains('lcbk-mtz-sc'))) ULT_ROLAGEM = Date.now();
   }, true);
   document.addEventListener('wheel', function (e) {
-    if (e.target && e.target.closest && e.target.closest('.lcbk-board')) ULT_ROLAGEM = Date.now();
+    if (e.target && e.target.closest && e.target.closest('.lcbk-board, .lcbk-mtz-sc')) ULT_ROLAGEM = Date.now();
   }, { capture: true, passive: true });
-  function rolando() { return Date.now() - ULT_ROLAGEM < 700; }
+  var ARRASTANDO = false;
+  document.addEventListener('mousedown', function (e) {
+    if (e.target && e.target.closest && e.target.closest('.lcbk-board, .lcbk-mtz-sc')) ARRASTANDO = true;
+  }, true);
+  document.addEventListener('mouseup', function () { if (ARRASTANDO) { ARRASTANDO = false; ULT_ROLAGEM = Date.now(); } }, true);
+  function rolando() { return ARRASTANDO || Date.now() - ULT_ROLAGEM < 700; }
   function chaveCol(sec, i) { var h = sec.querySelector('h3'); return sec.getAttribute('data-col') || (h ? h.textContent : '') || String(i); }
   function guardarRolagem(board) {
     var m = { _x: board ? board.scrollLeft : 0 };
@@ -3752,8 +3757,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     }
     clearTimeout(tRenderAdiado);
     var rolagemAntes = guardarRolagem(uiI.board);
+    var scM = uiI.matriz && uiI.matriz.querySelector('.lcbk-mtz-sc'), mtzTop = scM ? scM.scrollTop : 0, mtzLeft = scM ? scM.scrollLeft : 0;
     renderInstAgora();
     restaurarRolagem(uiI.board, rolagemAntes);
+    var scM2 = uiI.matriz && uiI.matriz.querySelector('.lcbk-mtz-sc');
+    if (scM2 && (mtzTop || mtzLeft)) { scM2.scrollTop = mtzTop; scM2.scrollLeft = mtzLeft; }
   }
   function renderInstAgora() {
     if (!uiI.board) return;
