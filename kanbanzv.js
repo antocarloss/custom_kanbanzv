@@ -980,11 +980,16 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     '.lcbk-soma{font-family:var(--lcb-c)!important;font-weight:500!important;font-size:12.5px!important;color:var(--lcb-grafite)!important}',
     '.lcbk-soma.is-prop{color:var(--lcb-marinho)!important;font-weight:700!important}',
     '.lcbk-head>div{min-width:0;flex:1}',
-    '.lcbk-head h3{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}',
-    '.lcbk-dica{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-    '.lcbk-soma{display:flex!important;justify-content:space-between;gap:6px;white-space:nowrap;font-size:12px!important;line-height:1.45}',
-    '.lcbk-soma .l{overflow:hidden;text-overflow:ellipsis;min-width:0}',
-    '.lcbk-soma .v{flex:none;font-variant-numeric:tabular-nums}',
+    '.lcbk-head h3{overflow-wrap:anywhere}',
+    '.lcbk-head.is-empilhado{display:block}',
+    '.lcbk-htop{display:flex;align-items:center;gap:8px;margin-bottom:3px}',
+    '.lcbk-htop h3{flex:1;min-width:0;margin:0}',
+    '.lcbk-htop .lcbk-exp{margin-left:0}',
+    '.lcbk-dica{display:block;font-size:11.5px!important;line-height:1.3;margin-top:1px}',
+    '.lcbk-soma{display:flex!important;justify-content:space-between;align-items:baseline;gap:4px 8px;flex-wrap:wrap;font-size:12px!important;line-height:1.35;margin-top:2px}',
+    '.lcbk-soma .l{min-width:0}',
+    '.lcbk-soma .v{flex:none;white-space:nowrap;font-variant-numeric:tabular-nums;margin-left:auto}',
+    '.lcbk-on .lcbk-board{grid-template-columns:repeat(var(--lcbk-cols,4),minmax(240px,1fr))}',
     '.lcbk-ind{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}',
     '.lcbk-ind-x{font-family:var(--lcb-c);font-weight:700;font-size:11.5px;border-radius:999px;padding:2px 8px}',
     '.lcbk-ind-x.is-atr{background:#FDECEF;color:var(--lcb-vermelho)}',
@@ -3918,6 +3923,16 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         (function (col, itensCol, b) { b.addEventListener('click', function (e) { e.stopPropagation(); exportarColuna(col, itensCol, b); }); })(c, list.slice(), bx);
         head.appendChild(bx);
       }
+      // t\u00edtulo, contador e Exportar na 1\u00aa linha; descri\u00e7\u00e3o, valores e indicadores com a largura toda
+      (function () {
+        var h3 = head.querySelector('h3');
+        if (!h3) return;
+        var topo = el('div', 'lcbk-htop');
+        topo.appendChild(h3);
+        [].slice.call(head.children).forEach(function (x) { if (x.classList && (x.classList.contains('lcbk-count') || x.classList.contains('lcbk-exp'))) topo.appendChild(x); });
+        head.insertBefore(topo, head.firstChild);
+        head.classList.add('is-empilhado');
+      })();
       sec.appendChild(head);
       var body = el('div', 'lcbk-list');
       if (!list.length) body.appendChild(el('p', 'lcbk-empty', q ? 'Nada com esse filtro' : 'Nada aqui'));
