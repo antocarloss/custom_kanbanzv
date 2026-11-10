@@ -1967,6 +1967,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   // Se a negocia\u00e7\u00e3o tiver o campo "Status Comercial" no Zeev, ele manda. Sem o campo, o status
   // \u00e9 deduzido da etapa (regras abaixo), at\u00e9 o campo ser criado no fluxo.
   var ST_COM = [
+    ['ppf', 'PPF (proposta futura)', 'lead com proposta futura, aberto neste m\u00eas'],
     ['novo', 'Novo', 'contato distribu\u00eddo, ainda n\u00e3o trabalhado'],
     ['tentativa', 'Tentativa de contato', 'cliente ainda n\u00e3o respondeu (m\u00edn. 5 tentativas)'],
     ['semsucesso', 'Contato sem sucesso', 'tentativas sem retorno (PPP de meses anteriores)'],
@@ -2005,8 +2006,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (it.tipo === 'filho' && (pagoConfirmado(it) || noFormal(it) || it.stage === 'pos' || (!it.ativo && !perdida(it)))) return 'pago';
     var doCampo = statusPorTexto(inf.statusCom);
     if (doCampo) return doCampo;
-    if (it.tipo !== 'filho') {                                 // lead (Pai) no PPP, com o vendedor
-      if (!it.ativo || colunaDe('triagem', it) !== 'ppp') return '';
+    if (it.tipo !== 'filho') {                                 // lead (Pai) no PPF ou no PPP, com o vendedor
+      if (!it.ativo) return '';
+      if (colunaDe('triagem', it) === 'ppf') return doMes(it) ? 'ppf' : '';   // PPF antigos: Relacionamento Novos
+      if (colunaDe('triagem', it) !== 'ppp') return '';
       var pt = statusPorTentativas(inf);
       if (pt) return pt;                                        // campo preenchido pelo vendedor manda
       if (!doMes(it)) return 'semsucesso';
@@ -2124,8 +2127,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       esteira: id,
       cols: function () {
         var nomes = { ppp: 'PPP (cliente n\u00e3o responde)', negociacao: 'PPP Negocia\u00e7\u00e3o' };
-        return colunasEsteira(id).filter(function (c) { return ['ppp', 'negociacao', 'proposta', 'pendencias'].indexOf(c.id) !== -1; })
-          .map(function (c) { c.precisaB = false; if (nomes[c.id]) c.name = nomes[c.id]; return c; })
+        return [{ id: 'ppf', name: 'PPF (proposta futura)', dica: 'abertos neste m\u00eas' }]
+          .concat(colunasEsteira(id).filter(function (c) { return ['ppp', 'negociacao', 'proposta', 'pendencias'].indexOf(c.id) !== -1; })
+          .map(function (c) { c.precisaB = false; if (nomes[c.id]) c.name = nomes[c.id]; if (c.id === 'ppp') c.dica = 'abertos neste m\u00eas'; return c; }))
           .concat([{ id: 'fecCom', name: 'Proposta Aceita', ok: true, dica: 'em formaliza\u00e7\u00e3o (fora as pend\u00eancias)' },
                    { id: 'cessao', name: 'Proposta assinada pelo cliente', dica: 'T23 em andamento' },
                    { id: 'fechados', name: 'Fechados (PAGO)', ok: true, dica: 'na T24 ou depois, ou conclu\u00edda', encerrada: true },
@@ -2137,7 +2141,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       },
       place: function (it) {
         if (it.tipo !== 'filho') {
-          var c1 = it.ativo ? colunaDe(id, it) : 'outros';
+          if (!it.ativo) return 'outros';
+          var cT = colunaDe('triagem', it);                    // PPF e PPP: mesma regra da esteira de triagem
+          if (cT === 'ppf' || cT === 'ppp') return doMes(it) ? cT : 'outros';
+          var c1 = colunaDe(id, it);
           return ['ppp', 'negociacao', 'proposta', 'pendencias'].indexOf(c1) !== -1 ? c1 : 'outros';
         }
         if (pagoConfirmado(it)) return 'fechados';                       // pago pelo financeiro / comprovante no Zeev
@@ -3749,11 +3756,12 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var velhoF = !FORM.em || FORM.base !== LC.base || Date.now() - FORM.em.getTime() > 10 * 60000;
       if (velhoF && !FORM.carregando && listaPronta() && !(FORM.erro && FORM.base === LC.base)) setTimeout(carregarFormularios, 0);
     }
-    if ((layoutId === 'triagem' || layoutId === 'inatividade' || layoutId === 'relnovos') && listaPronta() && !FORMP.carregando &&
-        lidos.some(function (it) { return it.tipo !== 'filho'; })) {
-      var chaveP = LC.base + '|' + layoutId;
+    if ((layoutId === 'triagem' || layoutId === 'inatividade' || layoutId === 'relnovos' || layoutId === 'comercial' || layoutId === 'diretor') &&
+        listaPronta() && !FORMP.carregando && lidos.some(function (it) { return it.tipo !== 'filho'; })) {
+      var modoP = layoutId === 'inatividade' || layoutId === 'relnovos' ? layoutId : 'triagem';
+      var chaveP = LC.base + '|' + modoP;
       var velhoP = !FORMP.em || FORMP.chave.indexOf(chaveP + '|') !== 0 || Date.now() - FORMP.em.getTime() > 10 * 60000;
-      if (velhoP && !(FORMP.erro && FORMP.chave.indexOf(chaveP + '|') === 0)) setTimeout(function () { carregarFormPai(layoutId, lidos); }, 0);
+      if (velhoP && !(FORMP.erro && FORMP.chave.indexOf(chaveP + '|') === 0)) setTimeout(function () { carregarFormPai(modoP, lidos); }, 0);
     }
     lidos.forEach(enriquecer);
     if (buscando && LB.q === stInst.busca && LB.itens.length) {       // junta o que o Zeev achou
