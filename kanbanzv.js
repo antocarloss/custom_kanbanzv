@@ -934,7 +934,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function ajustarAltura(b) {
     if (!b || !b.isConnected) return;
     var topo = Math.max(0, b.getBoundingClientRect().top);
-    b.style.setProperty('--lcbk-alt', Math.max(320, Math.round(window.innerHeight - topo - 70)) + 'px');
+    b.style.setProperty('--lcbk-alt', Math.max(320, Math.round(window.innerHeight * 0.6), Math.round(window.innerHeight - topo - 70)) + 'px');
   }
   window.addEventListener('resize', function () { ajustarAltura(ui && ui.board); ajustarAltura(uiI && uiI.board); });
 
@@ -989,8 +989,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     '.lcbk-list{padding:10px}',
     '.lcbk-empty{font-family:var(--lcb-c);font-size:13px;color:var(--lcb-apoio)}',
     /* cards */
-    '.lcbk-card{font-family:var(--lcb-c);background:#fff;border:1px solid var(--lcb-linha);border-left:1px solid var(--lcb-linha);border-radius:10px;padding:12px 13px;box-shadow:0 1px 2px rgba(4,15,55,.04);transition:border-color .15s,box-shadow .15s,transform .15s}',
-    '.lcbk-card:hover{border-color:#C9D2DE;box-shadow:0 6px 18px rgba(0,48,80,.08);transform:translateY(-1px)}',
+    '.lcbk-card{font-family:var(--lcb-c);background:#fff;border:1px solid var(--lcb-linha);border-left:1px solid var(--lcb-linha);border-radius:10px;padding:12px 13px;box-shadow:0 1px 2px rgba(4,15,55,.04);transition:border-color .12s;contain:layout paint}',
+    '.lcbk-card:hover{border-color:#AFBBCB}',
+    '.lcbk-list{overscroll-behavior:contain;-webkit-overflow-scrolling:touch;scroll-behavior:auto}',
     '.lcbk-card.is-late,.lcbk-card.is-today{border-left:3px solid var(--lcb-vermelho)}',
     '.lcbk-card.is-done{opacity:.92}',
     '.lcbk-top{align-items:center;margin-bottom:4px}',
@@ -1075,6 +1076,34 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (COR_COLUNA[c.id]) return COR_COLUNA[c.id];
     if (c.alert) return '#C8102E';
     return ['#003050', '#004065', '#030094', '#182EFF', '#020381'][i % 5];
+  }
+
+  // \u2500\u2500 Rolagem: o quadro \u00e9 redesenhado quando chegam dados (valores, atualiza\u00e7\u00e3o autom\u00e1tica).
+  //    A posi\u00e7\u00e3o de cada coluna \u00e9 guardada e devolvida, e o redesenho espera a pessoa parar de rolar.
+  var ULT_ROLAGEM = 0;
+  document.addEventListener('scroll', function (e) {
+    var t = e.target;
+    if (t && t.classList && (t.classList.contains('lcbk-list') || t.classList.contains('lcbk-board'))) ULT_ROLAGEM = Date.now();
+  }, true);
+  document.addEventListener('wheel', function (e) {
+    if (e.target && e.target.closest && e.target.closest('.lcbk-board')) ULT_ROLAGEM = Date.now();
+  }, { capture: true, passive: true });
+  function rolando() { return Date.now() - ULT_ROLAGEM < 700; }
+  function chaveCol(sec, i) { var h = sec.querySelector('h3'); return sec.getAttribute('data-col') || (h ? h.textContent : '') || String(i); }
+  function guardarRolagem(board) {
+    var m = { _x: board ? board.scrollLeft : 0 };
+    if (board) [].forEach.call(board.querySelectorAll('.lcbk-col'), function (sec, i) {
+      var l = sec.querySelector('.lcbk-list'); if (l) m[chaveCol(sec, i)] = l.scrollTop;
+    });
+    return m;
+  }
+  function restaurarRolagem(board, m) {
+    if (!board || !m) return;
+    [].forEach.call(board.querySelectorAll('.lcbk-col'), function (sec, i) {
+      var l = sec.querySelector('.lcbk-list'), v = m[chaveCol(sec, i)];
+      if (l && v) l.scrollTop = v;
+    });
+    if (m._x) board.scrollLeft = m._x;
   }
 
   function botaoMais(resto, onClick) {
@@ -1310,7 +1339,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       sec.appendChild(body);
       frag.appendChild(sec);
     });
+    var rolagemT = guardarRolagem(ui.board);
     ui.board.replaceChildren(frag);
+    restaurarRolagem(ui.board, rolagemT);
     requestAnimationFrame(function () { ajustarAltura(ui.board); });
     ui.resumo.replaceChildren(equipe ? resumoEquipe(porFase) : document.createTextNode(''));
     ui.resumo.style.display = equipe && state.view === 'kanban' ? '' : 'none';
@@ -1579,7 +1610,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-mtz-h .lcbk-mtz-tg{margin-left:auto}',
       '.lcbk-mtz-box.is-min{padding:8px 14px}',
       '.lcbk-mtz-box.is-min .lcbk-mtz-h{margin:0;align-items:center}',
-      '.lcbk-mtz-sc{overflow-x:auto}',
+      '.lcbk-mtz-sc{overflow:auto;max-height:34vh}',
+      '.lcbk-mtz thead th{position:sticky;top:0;background:#fff;z-index:1}',
+      '.lcbk-mtz tr.is-tot td,.lcbk-mtz tr.is-tot th{position:sticky;bottom:0;z-index:1}',
       '.lcbk-mtz{border-collapse:collapse;width:100%;font-size:12.5px;min-width:900px}',
       '.lcbk-mtz th,.lcbk-mtz td{padding:6px 8px;border-bottom:1px solid #eef0f4;text-align:left;white-space:nowrap}',
       '.lcbk-mtz thead th{font-size:11.5px;color:#5e6c84;font-weight:600;border-bottom:2px solid #e3e6ec}',
@@ -1995,6 +2028,14 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (it.tipo === 'filho' && inf.dono) return inf.dono;
     return it.fila ? 'Na fila (sem dono)' : (it.quem || 'Sem dono');
   }
+  function irParaQuadro() {
+    setTimeout(function () {
+      if (!uiI.board) return;
+      var alvo = uiI.matriz && uiI.matriz.style.display !== 'none' ? uiI.matriz : uiI.board;
+      try { alvo.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { alvo.scrollIntoView(); }
+      setTimeout(function () { ajustarAltura(uiI.board); }, 450);     // recalcula com o quadro j\u00e1 vis\u00edvel
+    }, 60);
+  }
   function botaoMatriz(oculta) {
     var b = el('button', 'lcbk-btn lcbk-mtz-tg', oculta ? 'Mostrar status por vendedor' : 'Ocultar tabela');
     b.type = 'button';
@@ -2040,13 +2081,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var tr = el('tr', (ehTotal ? 'is-tot' : '') + (!ehTotal && stInst.vend === r.nome ? ' is-on' : ''));
       var n = el(ehTotal ? 'th' : 'td', 'mtz-nome', ehTotal ? 'Todos os vendedores' : r.nome);
       n.title = ehTotal ? 'Mostrar todos' : 'Ver s\u00f3 ' + r.nome;
-      n.addEventListener('click', function () { stInst.vend = ehTotal || stInst.vend === r.nome ? '' : r.nome; stInst.etapa = ''; renderInst(); });
+      n.addEventListener('click', function () { stInst.vend = ehTotal || stInst.vend === r.nome ? '' : r.nome; stInst.etapa = ''; renderInst(); irParaQuadro(); });
       tr.appendChild(n);
       ST_COM.forEach(function (s) {
         var v = r[s[0]] || 0, td = el('td', 'num st-' + s[0] + (v ? '' : ' is-zero'), v ? fmtN(v) : '\u00b7');
         if (v) {
           td.title = (ehTotal ? 'Todos' : r.nome) + ' \u00b7 ' + s[1];
-          td.addEventListener('click', function () { stInst.vend = ehTotal ? '' : r.nome; stInst.etapa = 'st_' + s[0]; renderInst(); });
+          td.addEventListener('click', function () { stInst.vend = ehTotal ? '' : r.nome; stInst.etapa = 'st_' + s[0]; renderInst(); irParaQuadro(); });
         }
         tr.appendChild(td);
       });
@@ -3681,7 +3722,19 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     p.replaceChildren(frag);
   }
 
+  var tRenderAdiado = 0;
   function renderInst() {
+    if (rolando()) {                                   // a pessoa est\u00e1 rolando: redesenha logo depois
+      clearTimeout(tRenderAdiado);
+      tRenderAdiado = setTimeout(renderInst, 750);
+      return;
+    }
+    clearTimeout(tRenderAdiado);
+    var rolagemAntes = guardarRolagem(uiI.board);
+    renderInstAgora();
+    restaurarRolagem(uiI.board, rolagemAntes);
+  }
+  function renderInstAgora() {
     if (!uiI.board) return;
     var lidos = itensDaLista();
     var completo = completoServe();
