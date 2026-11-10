@@ -3215,7 +3215,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   function moedaBR(n) { return 'R$ ' + Math.round(n).toLocaleString('pt-BR'); }
   var FORM = { porSol: {}, carregando: false, erro: '', em: null, base: '', incompleto: 0 };
-  var FORM_VERSAO = 4;                                         // muda quando a leitura do formul\u00e1rio ganha campos novos
+  var FORM_VERSAO = 5;                                         // muda quando a leitura do formul\u00e1rio ganha campos novos
   function lerFormCsv(txt, por) {
     var linhas = lerCsv(txt);
     if (!linhas.length) return 0;
@@ -3322,6 +3322,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       o.dtAtu = clean(pega(r, ['dataDeAtualizacaoDoCalculo', 'dataDeAtualizacao']));
       o.origem = clean(pega(r, ['origemDoCliente']));
       o.carteira = clean(pega(r, ['qualOTipoDeClienteCarteira']));
+      o.assOk = /aprovad/i.test(clean(pega(r, ['parecerDasAssinaturas'])));
       o.statusCom = semDoc(pega(r, ['statusComercial', 'statusDoComercial', 'situacaoComercial', 'statusDaNegociacao']));
       // Tentativas de contato: tabela do formul\u00e1rio (uma linha por tentativa, at\u00e9 5). O export pode trazer
       // as linhas juntas ("1\u00aa Tentativa; 2\u00aa Tentativa") \u2014 conta as linhas e o maior n\u00famero escolhido.
@@ -3475,7 +3476,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function finDia() { var hoje = new Date(); hoje.setHours(0, 0, 0, 0); return (stInst.finDia && lerData(stInst.finDia)) || hoje; }
   function finPeriodo() {
     var hoje = new Date(); hoje.setHours(0, 0, 0, 0);
-    if (finModo() === 'relatorio') { var d = finDia(); return { de: new Date(d.getFullYear(), d.getMonth(), 1), ate: d }; }
+    if (finModo() === 'relatorio') {                    // l\u00ea o m\u00eas inteiro uma vez; trocar o dia n\u00e3o rel\u00ea o log
+      var d = finDia(), fimMes = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+      return { de: new Date(d.getFullYear(), d.getMonth(), 1), ate: fimMes > hoje ? hoje : fimMes };
+    }
     var de = stInst.finDe ? lerData(stInst.finDe) : hoje, ate = stInst.finAte ? lerData(stInst.finAte) : de;
     if (!de) de = hoje; if (!ate || ate < de) ate = de;
     return { de: de, ate: ate };
@@ -3511,8 +3515,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
           if (!ass[x.sol] || x.fin > ass[x.sol]) ass[x.sol] = x.fin;
         }
       });
-      FIN.pagos = Object.keys(pag).filter(function (sol) { return pag[sol] >= P.de && pag[sol] < ate1; })
-        .map(function (sol) { return { sol: sol, pago: pag[sol], assin: ass[sol] || null }; });
+      FIN.pag = pag; FIN.ass = ass; FIN.de = P.de; FIN.ate1 = ate1;
+      FIN.pagos = [];                                                     // calculado na tela (finPagos)
       FIN.em = new Date(); FIN.carregando = false; FIN.prog = '';
       acc = null;
       renderInst();
@@ -3546,15 +3550,28 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   function finFundo(f) { return /2|ii/i.test(f || '') ? 'II' : /1|i/i.test(f || '') ? 'I' : ''; }
   function primeiroNome(n) { return clean(n || '').split(/\s+/)[0] || ''; }
+  // Pago no per\u00edodo = tarefa de pagamento/comprovante finalizada no per\u00edodo, OU (regra do fundo)
+  // assinaturas aprovadas no formul\u00e1rio, com a \u00faltima tarefa de assinatura finalizada no per\u00edodo.
+  function finPagos() {
+    if (!FIN.pag) return [];
+    var vistos = {}, out = [];
+    Object.keys(FIN.pag).concat(Object.keys(FIN.ass || {})).forEach(function (sol) {
+      if (vistos[sol]) return; vistos[sol] = 1;
+      var f = FORM.porSol[sol] || {}, d = FIN.pag[sol], via = 'pagamento';
+      if (!d && f.assOk && FIN.ass[sol]) { d = FIN.ass[sol]; via = 'assinatura'; }
+      if (d && d >= FIN.de && d < FIN.ate1) out.push({ sol: sol, pago: d, assin: FIN.ass[sol] || null, via: via });
+    });
+    return out;
+  }
   function linhasFinanceiro() {
-    return (FIN.pagos || []).map(function (p) {
+    return finPagos().map(function (p) {
       var it = { num: p.sol, info: {} }; enriquecer(it);
       var inf = it.info;
       return {
         sol: p.sol, pagoEm: p.pago,
         cols: [ddmmaaaa(p.pago), inf.nProp || '', inf.propN ? brl2(inf.propN) : '', inf.faceN ? brl2(inf.faceN) : '', inf.dtAtu || '',
                finTipo(inf.tipo), finAno(inf.tipo), finOrigem(inf), primeiroNome(inf.dono), finFundo(inf.fundo), p.assin ? ddmmaaaa(p.assin) : ''],
-        pagoN: inf.propN || 0, faceN: inf.faceN || 0, temForm: !!FORM.porSol[p.sol],
+        pagoN: inf.propN || 0, faceN: inf.faceN || 0, temForm: !!FORM.porSol[p.sol], via: p.via,
         cat: finCategoria(inf.tipo), tipo: finTipo(inf.tipo), ano: finAno(inf.tipo), nProp: inf.nProp || '',
         vend: primeiroNome(inf.dono), fundo: finFundo(inf.fundo)
       };
@@ -3605,8 +3622,22 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       ['xl/worksheets/sheet1.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cols><col min="1" max="11" width="18" customWidth="1"/></cols><sheetData>' + rows + '</sheetData></worksheet>']
     ]);
   }
+  function notaFinanceiro(linhas) {
+    var notas = [];
+    var nP = Object.keys(FIN.nomesPago || {}), nA = Object.keys(FIN.nomesAss || {});
+    var porPag = linhas.filter(function (l) { return l.via === 'pagamento'; }).length, porAss = linhas.length - porPag;
+    notas.push('Crit\u00e9rio: ' + porPag + ' pela tarefa de pagamento/comprovante \u00b7 ' + porAss + ' por assinaturas aprovadas');
+    notas.push('Tarefas de pagamento no log: ' + (nP.length ? nP.join(' \u00b7 ') : 'nenhuma'));
+    notas.push('Tarefas de assinatura no log: ' + (nA.length ? nA.join(' \u00b7 ') : 'nenhuma'));
+    if (!FORM.em) notas.push('Aguarde "lendo valores das negocia\u00e7\u00f5es\u2026": o crit\u00e9rio das assinaturas depende do formul\u00e1rio.');
+    if (linhas.some(function (l) { return !l.temForm; })) notas.push('Linhas em cinza: valores do formul\u00e1rio ainda n\u00e3o lidos.');
+    if (FIN.incompleto) notas.push('Aten\u00e7\u00e3o: parte do log veio cortada pelo Zeev (' + FIN.incompleto + ' dia(s) com mais de 1.000 tarefas).');
+    return el('p', 'lcbk-fin-nota', notas.join('  |  '));
+  }
   function renderRelatorioDiario(box, linhas) {
     var dia = finDia(), dDia = ddmmaaaa(dia), mesTxt = ('0' + (dia.getMonth() + 1)).slice(-2) + '/' + dia.getFullYear();
+    var ateDia = new Date(dia.getTime() + DIA);
+    linhas = linhas.filter(function (l) { return l.pagoEm < ateDia; });          // m\u00eas at\u00e9 o dia escolhido
     var doDia = linhas.filter(function (l) { return ddmmaaaa(l.pagoEm) === dDia; });
     var ordem = ['Precat\u00f3rio 2026', 'Precat\u00f3rio 2027', 'Precat\u00f3rio 2028', 'Precat\u00f3rio 2029', 'Pr\u00e9 Precat\u00f3rio', 'Estrat\u00e9gico', 'RPV'];
     var cartao = function (titulo, lista) {
@@ -3726,7 +3757,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var sub = ddmmaaaa(P.de) === ddmmaaaa(P.ate) ? ddmmaaaa(P.de) : ddmmaaaa(P.de) + ' a ' + ddmmaaaa(P.ate);
     if (FIN.carregando) box.appendChild(el('p', 'lcbk-fin-msg', FIN.prog || 'Lendo o log de tarefas\u2026'));
     else if (FIN.erro) box.appendChild(el('p', 'lcbk-fin-msg is-erro', 'N\u00e3o foi poss\u00edvel ler o log de tarefas (' + FIN.erro + ').'));
-    if (FIN.pagos && finModo() === 'relatorio') {
+    if (FIN.pagos && !FIN.carregando && finModo() === 'relatorio') {
       box.classList.add('is-relatorio');
       var doDiaR = renderRelatorioDiario(box, linhas);
       var acR = el('div', 'lcbk-fin-acoes');
@@ -3742,7 +3773,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       bIR.addEventListener('click', function () { window.print(); });
       [bXR, bCR].forEach(function (b) { b.disabled = !doDiaR.length; acR.appendChild(b); }); acR.appendChild(bIR);
       box.insertBefore(acR, box.children[1]);
-    } else if (FIN.pagos) {
+      box.appendChild(notaFinanceiro(linhas));
+    } else if (FIN.pagos && !FIN.carregando) {
       var soma = function (k) { return linhas.reduce(function (a, l) { return a + l[k]; }, 0); };
       var kpis = el('div', 'lcbk-fin-kpis');
       [['Compras \u00b7 ' + sub, fmtN(linhas.length)], ['Capital pago', 'R$ ' + brl2(soma('pagoN'))], ['Valor de face', 'R$ ' + brl2(soma('faceN'))]].forEach(function (k) {
@@ -3778,13 +3810,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         tb.appendChild(tr);
       });
       t.appendChild(tb); sc.appendChild(t); box.appendChild(sc);
-      var notas = [];
-      var nP = Object.keys(FIN.nomesPago), nA = Object.keys(FIN.nomesAss);
-      notas.push('Tarefa usada como pagamento: ' + (nP.length ? nP.join(' \u00b7 ') : 'nenhuma encontrada'));
-      notas.push('Tarefa usada como assinatura: ' + (nA.length ? nA.join(' \u00b7 ') : 'nenhuma encontrada'));
-      if (linhas.some(function (l) { return !l.temForm; })) notas.push('Linhas em cinza: valores do formul\u00e1rio ainda n\u00e3o lidos (aguarde "lendo valores das negocia\u00e7\u00f5es\u2026").');
-      if (FIN.incompleto) notas.push('Aten\u00e7\u00e3o: parte do log veio cortada pelo Zeev (' + FIN.incompleto + ' dia(s) com mais de 1.000 tarefas).');
-      box.appendChild(el('p', 'lcbk-fin-nota', notas.join('  |  ')));
+      box.appendChild(notaFinanceiro(linhas));
     }
     uiI.fin.replaceChildren(box);
   }
@@ -4649,7 +4675,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     uiI.layout = el('select', 'lcbk-select');
     uiI.layout.setAttribute('aria-label', 'Disposi\u00e7\u00e3o do Kanban');
     Object.keys(LAYOUTS_INST).forEach(function (k) {
-      if (k === 'financeiro' && !financeiroLiberado()) return;       // só para quem foi liberado
+      if (k === 'financeiro' && !financeiroLiberado()) return;       // s\u00f3 para quem foi liberado
       var o = el('option', null, LAYOUTS_INST[k].nome);
       o.value = k;
       uiI.layout.appendChild(o);
