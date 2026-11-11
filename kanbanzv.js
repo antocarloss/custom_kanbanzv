@@ -2131,6 +2131,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     ['tentativa', 'Tentativa de contato', 'cliente ainda n\u00e3o respondeu (m\u00edn. 5 tentativas)'],
     ['semsucesso', 'Contato sem sucesso', 'tentativas sem retorno (PPP de meses anteriores)'],
     ['negociacao', 'Em negocia\u00e7\u00e3o', 'em contato com o cliente para negociar'],
+    ['pendencias', 'Pend\u00eancias', 'aguardando corre\u00e7\u00e3o de pend\u00eancias (mesma coluna da esteira comercial)'],
     ['aceita', 'Proposta aceita', 'aceitou e enviou os documentos'],
     ['pago', 'Fechado (PAGO)', 'na T24 ou depois, ou pago pelo financeiro'],
     ['recusada', 'Proposta recusada', 'sem interesse pelo pre\u00e7o'],
@@ -2187,6 +2188,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       if (PERDA.porSol && PERDA.porSol[it.num] === 'juridico') return 'fora';
       return inf.propN ? 'recusada' : 'recusou';
     }
+    if (it.stage !== 'cessao' && colunaDe('comercial', it) === 'pendencias') return 'pendencias';   // igual \u00e0 esteira comercial
     if (it.stage === 'cessao' || CFG.producao.posAceite.indexOf(cod) !== -1) return 'aceita';
     if ((cod === 'T01' || cod === 'T01.01') && !inf.propN && statusPorTentativas(inf)) return statusPorTentativas(inf);
     if (cod === 'T01.01') return 'tentativa';
