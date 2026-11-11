@@ -111,6 +111,9 @@
                        '3717', '3752', '3787', '3791', '3795'],
       // PPP com o vendedor: campo "Tentativas de contato" (no resumo do Zeev). 0 = Novo; 1 a 4 = Tentativa de
       // contato; a partir deste n\u00famero (ou texto "sem sucesso") = Contato sem sucesso.
+      // Administrativo: tarefas com estas pessoas v\u00e3o para a coluna "Administrativo" (comercial e diretor).
+      // O Zeev mostra o NOME do respons\u00e1vel; a compara\u00e7\u00e3o usa as partes do e-mail (joao + sousa, iara + santos).
+      administrativo: ['joao.sousa@lcbank.com.br', 'iara.santos@lcbank.com.br'],
       tentativasSemSucesso: 5,
       tentativaIntervaloH: 2,     // o diretor quer uma tentativa a cada 2 horas
       formal: 'T24',              // Filho: chegou na T24 = fechado formalmente (data de recebimento da T24)
@@ -1153,6 +1156,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   var COR_COLUNA = {
     triagem: '#003050', acompanhar: '#004065', ppf: '#030094', ppp: '#182EFF', negociacao: '#182EFF',
     proposta: '#030094', pendencias: '#020381', fecCom: '#004065', cessao: '#020381', fechados: '#003050',
+    administrativo: '#004065', st_admin: '#004065',
     documentacao: '#003050', analise: '#004065', reprovacao: '#C8102E', contrato: '#030094', video: '#020381', pos: '#003050'
   };
   function corDaColuna(c, i) {
@@ -1716,6 +1720,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-mtz td.st-pago:not(.is-zero),.lcbk-mtz td.st-aceita:not(.is-zero){color:#1f5e3b}',
       '.lcbk-mtz td.st-recusada:not(.is-zero),.lcbk-mtz td.st-recusou:not(.is-zero),.lcbk-mtz td.st-fora:not(.is-zero){color:#a1281f}',
       '.lcbk-mtz td.mtz-t{color:#172b4d;cursor:default}',
+      '.lcbk-mtz td.st-admin:not(.is-zero){color:#004065;background:#F2FBFB}',
+      '.lcbk-mtz th.st-admin{border-left:2px solid #E3E7EE}',
       '.lcbk-fin{background:#fff;border:1px solid #e3e7ee;border-radius:12px;padding:14px 16px;margin:0 0 12px}',
       '.lcbk-fin-top{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;margin-bottom:10px}',
       '.lcbk-fin-top h2{margin:0;font-family:"Outfit","Montserrat",system-ui,sans-serif;font-size:18px;color:#003050}',
@@ -1778,6 +1784,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-rd-chip.is-rpv{background:#D4FFFE;color:#004065}',
       '.lcbk-rd-chip.is-prc{background:#EEF0FF;color:#030094}',
       '@media print{.lcbk-bar,.lcbk-fin-acoes,.lcbk-seg-wrap,.lcbk-fin-per{display:none!important}}',
+      '.lcbk-col[data-col="administrativo"],.lcbk-col[data-col="st_admin"]{--lcbk-cor:#004065}',
       '.lcbk-mais{width:100%;margin-top:4px;background:#fff}',
       '.lcbk-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#404857;cursor:pointer}',
       '.lcbk-chip.is-area{background:#f1f2f5;color:#404857}',
@@ -2146,6 +2153,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   // Tentativas de contato (campo preenchido pelo vendedor): Novo / Tentativa / Sem sucesso
   var TEM_TENTATIVAS = false;
+  function semAcentoMin(t) { return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); }
+  var ADM_PARTES = (CFG.producao.administrativo || []).map(function (e) { return semAcentoMin(String(e).split('@')[0]).split(/[._-]+/).filter(Boolean); });
+  function comAdministrativo(it) {
+    if (!it || !it.ativo || !it.quem) return false;
+    var palavras = semAcentoMin(it.quem).split(/[^a-z]+/);
+    return ADM_PARTES.some(function (ps) { return ps.every(function (p) { return palavras.indexOf(p) !== -1; }); });
+  }
   function statusPorTentativas(inf) {
     if (inf.tentTxt == null || inf.tentTxt === '') return '';
     var t = lower(inf.tentTxt);
@@ -2200,6 +2214,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     b.addEventListener('click', function () { stInst.mtzAuto = false; ls('lcbKanbanMatriz', oculta ? 'on' : 'off'); renderInst(); });
     return b;
   }
+  function nomeStatusCom(id) { if (id === 'st_admin') return 'Com o administrativo'; return (ST_COM.filter(function (x) { return 'st_' + x[0] === id; })[0] || [0, ''])[1]; }
   function desenharMatriz(lista) {
     if (!uiI.matriz) return;
     if (ls('lcbKanbanMatriz') === 'off' || stInst.mtzAuto) {      // tabela recolhida: s\u00f3 uma faixa fina
@@ -2207,7 +2222,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var hm = el('div', 'lcbk-mtz-h');
       hm.appendChild(el('strong', null, 'Status comercial por vendedor'));
       if (stInst.vend) {
-        hm.appendChild(el('span', null, 'Mostrando: ' + stInst.vend + (stInst.etapa ? ' \u00b7 ' + ((ST_COM.filter(function (x) { return 'st_' + x[0] === stInst.etapa; })[0] || [0, ''])[1]) : '')));
+        hm.appendChild(el('span', null, 'Mostrando: ' + stInst.vend + (stInst.etapa ? ' \u00b7 ' + nomeStatusCom(stInst.etapa) : '')));
         var tudo = el('button', 'lcbk-btn', 'Todos os vendedores');
         tudo.type = 'button';
         tudo.addEventListener('click', function () { stInst.vend = ''; stInst.etapa = ''; stInst.mtzAuto = false; renderInst(); });
@@ -2225,6 +2240,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       if (!st) return;
       var d = donoDe(it), r = por[d] || (por[d] = { nome: d, n: 0 });
       r[st] = (r[st] || 0) + 1; r.n++; tot[st] = (tot[st] || 0) + 1;
+      if (comAdministrativo(it)) { r.adm = (r.adm || 0) + 1; tot.adm = (tot.adm || 0) + 1; }
     });
     var semDono = function (n) { return /^(na fila|sem dono)/i.test(n); };
     var linhas = Object.keys(por).map(function (k) { return por[k]; })
@@ -2233,6 +2249,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     th.appendChild(el('th', null, 'Vendedor'));
     ST_COM.forEach(function (s) { var c = el('th', 'st-' + s[0], s[1]); c.title = s[2]; th.appendChild(c); });
     th.appendChild(el('th', null, 'Total'));
+    var thA = el('th', 'st-admin', 'Com o administrativo'); thA.title = 'Quantas negocia\u00e7\u00f5es do vendedor est\u00e3o com Jo\u00e3o Sousa ou Iara Santos agora (j\u00e1 contadas no status)'; th.appendChild(thA);
     var thead = el('thead'); thead.appendChild(th); t.appendChild(thead);
     var tb = el('tbody');
     var linha = function (r, ehTotal) {
@@ -2250,16 +2267,22 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         tr.appendChild(td);
       });
       tr.appendChild(el('td', 'num mtz-t', fmtN(r.n)));
+      var vA = r.adm || 0, tdA = el('td', 'num st-admin' + (vA ? '' : ' is-zero'), vA ? fmtN(vA) : '\u00b7');
+      if (vA) {
+        tdA.title = (ehTotal ? 'Todos' : r.nome) + ' \u00b7 com o administrativo';
+        tdA.addEventListener('click', function () { stInst.vend = ehTotal ? '' : r.nome; stInst.etapa = 'st_admin'; stInst.mtzAuto = true; renderInst(); irParaQuadro(); });
+      }
+      tr.appendChild(tdA);
       return tr;
     };
     linhas.forEach(function (r) { tb.appendChild(linha(r, false)); });
-    var T = { nome: '', n: 0 }; ST_COM.forEach(function (s) { T[s[0]] = tot[s[0]] || 0; T.n += T[s[0]]; });
+    var T = { nome: '', n: 0, adm: tot.adm || 0 }; ST_COM.forEach(function (s) { T[s[0]] = tot[s[0]] || 0; T.n += T[s[0]]; });
     tb.appendChild(linha(T, true));
     t.appendChild(tb);
     var box = el('div', 'lcbk-mtz-box');
     var h = el('div', 'lcbk-mtz-h');
     h.appendChild(el('strong', null, 'Status comercial por vendedor'));
-    h.appendChild(el('span', null, stInst.vend ? 'Mostrando: ' + stInst.vend + (stInst.etapa ? ' \u00b7 ' + (ST_COM.filter(function (s) { return 'st_' + s[0] === stInst.etapa; })[0] || [0, ''])[1] : '') + ' (clique em "Todos os vendedores" para voltar)'
+    h.appendChild(el('span', null, stInst.vend ? 'Mostrando: ' + stInst.vend + (stInst.etapa ? ' \u00b7 ' + nomeStatusCom(stInst.etapa) : '') + ' (clique em "Todos os vendedores" para voltar)'
       : 'Clique num vendedor ou num n\u00famero para abrir as negocia\u00e7\u00f5es no quadro'));
     h.appendChild(botaoMatriz(false));
     box.appendChild(h);
@@ -2376,8 +2399,20 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       }
     };
   }
+  function comColunaAdministrativo(L) {
+    var cols0 = L.cols;
+    L.cols = function () {
+      var c = typeof cols0 === 'function' ? cols0() : cols0.slice(), col = { id: 'administrativo', name: 'Administrativo', dica: 'espelho: tarefas com Jo\u00e3o Sousa ou Iara Santos (continuam tamb\u00e9m na coluna da etapa)' };
+      var i = -1; c.forEach(function (x, k) { if (x.id === 'fecCom') i = k; });
+      if (i === -1) c.forEach(function (x, k) { if (i === -1 && x.id === 'cessao') i = k - 1; });
+      c.splice(i >= 0 ? i + 1 : c.length - 1, 0, col);
+      return c;
+    };
+    L.espelho = function (it) { return comAdministrativo(it) ? 'administrativo' : ''; };
+    return L;
+  }
   var LAYOUTS_INST = {
-    comercial: layoutEsteiraInst('comercial'),
+    comercial: comColunaAdministrativo(layoutEsteiraInst('comercial')),
     juridico: layoutEsteiraInst('juridico'),
     triagem: layoutEsteiraInst('triagem'),
     diretor: {
@@ -2387,9 +2422,14 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         return ST_COM.map(function (s) {
           return { id: 'st_' + s[0], name: s[1], dica: s[2], ok: s[0] === 'pago' || s[0] === 'aceita',
                    alert: ['recusada', 'recusou', 'fora'].indexOf(s[0]) !== -1, encerrada: ['pago', 'recusada', 'recusou', 'fora'].indexOf(s[0]) !== -1 };
-        }).concat([{ id: 'outros', name: 'Outras \u00e1reas', opcional: true, outras: true }]);
+        }).reduce(function (a, c) {
+          a.push(c);
+          if (c.id === 'st_aceita') a.push({ id: 'st_admin', name: 'Administrativo', dica: 'espelho: tarefas com Jo\u00e3o Sousa ou Iara Santos (continuam tamb\u00e9m no status)' });
+          return a;
+        }, []).concat([{ id: 'outros', name: 'Outras \u00e1reas', opcional: true, outras: true }]);
       },
-      place: function (it) { var st = statusComercial(it); return st ? 'st_' + st : 'outros'; }
+      place: function (it) { var st = statusComercial(it); return st ? 'st_' + st : 'outros'; },
+      espelho: function (it) { return comAdministrativo(it) && statusComercial(it) ? 'st_admin' : ''; }
     },
     financeiro: {
       nome: 'Financeiro \u00b7 fechados e pagos no dia',
@@ -2633,7 +2673,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   // Inatividade e Relacionamento Novos olham todos os meses: ignoram o filtro de per\u00edodo
   function periodoEfetivo() {
     var lay = layoutInstAtivo();
-    return lay === 'inatividade' || lay === 'relnovos' || lay === 'financeiro' ? '' : (stInst.periodo || '');   // financeiro: o período é o da própria visão
+    return lay === 'inatividade' || lay === 'relnovos' || lay === 'financeiro' ? '' : (stInst.periodo || '');   // financeiro: o per\u00edodo \u00e9 o da pr\u00f3pria vis\u00e3o
   }
   function nomePeriodo(k) { for (var i = 0; i < PERIODOS.length; i++) if (PERIODOS[i][0] === k) return PERIODOS[i][1]; return ''; }
   function intervaloPeriodo(k) {
@@ -2669,8 +2709,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function modoNecessario() {
     if (LC.completo && LC.completo.daCopia && !totalZeev()) return LC.completo.funil || '';   // p\u00e1gina ainda sem total
     var lay = layoutInstAtivo();
+    if (lay === 'financeiro' && LC.url) return finModo() === 'kanban' ? 'fin' : 'nada';   // financeiro: lista m\u00ednima
     if (lay === 'diretor') lay = 'comercial';                       // usa o mesmo funil da esteira comercial
-    if (lay === 'financeiro') lay = 'juridico';                     // s\u00f3 as negocia\u00e7\u00f5es
     if ((lay !== 'comercial' && lay !== 'juridico' && lay !== 'inatividade' && lay !== 'relnovos') || !LC.url) return '';
     if (new URL(LC.url).searchParams.get('codFlowsOrServices')) return '';
     if (lay === 'inatividade' || lay === 'relnovos') {                 // s\u00f3 o Pai em andamento
@@ -2682,6 +2722,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     return t && t > CFG.lista.funilAcima ? lay : '';
   }
   function serve(tem, precisa) {                               // a carga 'tem' atende a esteira 'precisa'?
+    if (precisa === 'nada') return true;                        // planilha/relat\u00f3rio do financeiro: n\u00e3o usa a lista
+    if (precisa === 'fin') return !tem || tem === 'fin' || tem === 'juridico' || tem === 'comercial';
     if (!precisa) return !tem;
     return !tem || tem === precisa || ((precisa === 'juridico' || precisa === 'pai') && tem === 'comercial');
   }
@@ -2693,6 +2735,15 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   function fontesFunil(modo, u0) {
     var F = CFG.producao.fluxos, fontes = [];
+    if (modo === 'nada') return [];
+    if (modo === 'fin') {                                       // negocia\u00e7\u00f5es em andamento (para o Kanban da T28)
+      return fluxosNegociacao().map(function (f) {
+        var u = new URL(u0.href);
+        u.searchParams.set('codFlowsOrServices', f[0] + ';' + f[1] + ';0;0');
+        u.searchParams.set('flowStatus', 'S');
+        return u.href;
+      });
+    }
     F.forEach(function (f) {
       var papel = f[2], status = null;
       if (modo === 'pai') {                                   // Inatividade / Relacionamento Novos
@@ -2812,7 +2863,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     LC.carregando = true; LC.cancelar = false; LC.erro = ''; LC.base = base; LC.parcial = itens;
     var tRender = 0;
     function progresso() {
-      LC.prog = 'Carregando ' + (modo ? (modo === 'pai' ? 'os leads em andamento' : 'o funil ' + (modo === 'comercial' ? 'comercial' : 'jur\u00eddico')) : '') +
+      LC.prog = 'Carregando ' + (modo ? (modo === 'pai' ? 'os leads em andamento' : modo === 'fin' ? 'as negocia\u00e7\u00f5es em andamento' : 'o funil ' + (modo === 'comercial' ? 'comercial' : 'jur\u00eddico')) : '') +
         (per ? ' (' + nomePeriodo(per).toLowerCase() + ')' : '') + ': ' + fmtN(itens.length) + (total ? ' de ' + fmtN(total) : '') + '\u2026';
       if (Date.now() - tRender > 400) { tRender = Date.now(); renderInst(); }
     }
@@ -2825,7 +2876,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       if (msg) { LC.erro = msg; LC.completo = null; }
       else if (!trocou) {
         LC.completo = { base: base, itens: itens, em: new Date(), total: itens.length, funil: modo, periodo: per };
-        setTimeout(salvarCache, 0);
+        if (modo !== 'nada') setTimeout(salvarCache, 0);           // a lista vazia do financeiro n\u00e3o substitui a c\u00f3pia salva
       }
       if (trocou) setTimeout(agendarAuto, 50);
       renderInst();
@@ -3516,6 +3567,31 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     return { de: de, ate: fimMes > hoje ? hoje : fimMes };
   }
   function finChave() { var J = finJanela(); return (LC.base || '') + '|' + ddmmaaaa(J.de) + '|' + ddmmaaaa(J.ate); }
+  var CHAVE_FIN = 'lcbkFinCopia';
+  function salvarFin() {
+    try {
+      var ms = function (m) { var o = {}; Object.keys(m || {}).forEach(function (k) { o[k] = m[k] ? +m[k] : 0; }); return o; };
+      var t = {}; Object.keys(FIN.t28 || {}).forEach(function (k) { var x = FIN.t28[k]; t[k] = [x.chegada ? +x.chegada : 0, x.final ? +x.final : 0, x.aberta ? 1 : 0]; });
+      var dg = FIN.diagPag ? { n: FIN.diagPag.n, andamento: FIN.diagPag.andamento, semData: FIN.diagPag.semData, min: FIN.diagPag.min ? +FIN.diagPag.min : 0,
+                              max: FIN.diagPag.max ? +FIN.diagPag.max : 0, sols: FIN.diagPag.sols } : null;
+      localStorage.setItem(CHAVE_FIN, JSON.stringify({ chave: FIN.chave, em: +FIN.em, pag: ms(FIN.pag), ass: ms(FIN.ass), val: ms(FIN.val), t28: t,
+        nomesPago: FIN.nomesPago, nomesAss: FIN.nomesAss, diagPag: dg }));
+    } catch (e) { /* sem espa\u00e7o: segue sem c\u00f3pia */ }
+  }
+  function restaurarFin() {
+    if (FIN.em) return;
+    try {
+      var c = JSON.parse(localStorage.getItem(CHAVE_FIN) || 'null');
+      if (!c || c.chave !== finChave() || Date.now() - c.em > 12 * 3600000) return;
+      var dt = function (m) { var o = {}; Object.keys(m || {}).forEach(function (k) { o[k] = m[k] ? new Date(m[k]) : null; }); return o; };
+      FIN.pag = dt(c.pag); FIN.ass = dt(c.ass); FIN.val = dt(c.val); FIN.t28 = {};
+      Object.keys(c.t28 || {}).forEach(function (k) { var x = c.t28[k]; FIN.t28[k] = { chegada: x[0] ? new Date(x[0]) : null, final: x[1] ? new Date(x[1]) : null, aberta: !!x[2] }; });
+      FIN.nomesPago = c.nomesPago || {}; FIN.nomesAss = c.nomesAss || {};
+      FIN.diagPag = c.diagPag ? { n: c.diagPag.n, andamento: c.diagPag.andamento, semData: c.diagPag.semData, min: c.diagPag.min ? new Date(c.diagPag.min) : null,
+                                 max: c.diagPag.max ? new Date(c.diagPag.max) : null, sols: c.diagPag.sols || {} } : null;
+      FIN.chave = c.chave; FIN.em = new Date(c.em); FIN.pagos = []; FIN.daCopia = true;
+    } catch (e) { /* c\u00f3pia inv\u00e1lida: l\u00ea de novo */ }
+  }
   function carregarFinanceiro() {
     if (FIN.carregando) return;
     var P = finJanela(), hoje = new Date(); hoje.setHours(0, 0, 0, 0);
@@ -3570,8 +3646,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       });
       FIN.pag = pag; FIN.ass = ass; FIN.val = val; FIN.t28 = t28;
       FIN.pagos = [];                                                     // calculado na tela (finPagos)
-      FIN.em = new Date(); FIN.carregando = false; FIN.prog = '';
+      FIN.em = new Date(); FIN.carregando = false; FIN.prog = ''; FIN.daCopia = false;
       acc = null;
+      setTimeout(salvarFin, 0);
       renderInst();
     }
   }
@@ -3795,6 +3872,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var ativo = layoutInstAtivo() === 'financeiro';
     uiI.fin.style.display = ativo ? '' : 'none';
     if (!ativo) return;
+    restaurarFin();
     var P = finPeriodo(), chave = finChave();
     if (!FIN.carregando && LC.base && (FIN.chave !== chave || !FIN.em || Date.now() - FIN.em.getTime() > 10 * 60000) && !(FIN.erro && FIN.chave === chave)) setTimeout(carregarFinanceiro, 0);
     var box = el('div', 'lcbk-fin');
@@ -3851,9 +3929,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       return;
     }
     var sub = ddmmaaaa(P.de) === ddmmaaaa(P.ate) ? ddmmaaaa(P.de) : ddmmaaaa(P.de) + ' a ' + ddmmaaaa(P.ate);
-    if (FIN.carregando) box.appendChild(el('p', 'lcbk-fin-msg', FIN.prog || 'Lendo o log de tarefas\u2026'));
+    var temDados = FIN.pag && FIN.chave === chave;
+    if (FIN.carregando) box.appendChild(el('p', 'lcbk-fin-msg', temDados ? 'Atualizando\u2026 (mostrando a \u00faltima leitura, de ' + FIN.em.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + ')' : (FIN.prog || 'Lendo o log de tarefas\u2026')));
     else if (FIN.erro) box.appendChild(el('p', 'lcbk-fin-msg is-erro', 'N\u00e3o foi poss\u00edvel ler o log de tarefas (' + FIN.erro + ').'));
-    if (FIN.pagos && !FIN.carregando && finModo() === 'relatorio') {
+    if (FIN.pagos && (temDados || !FIN.carregando) && finModo() === 'relatorio') {
       box.classList.add('is-relatorio');
       var doDiaR = renderRelatorioDiario(box, linhas);
       var acR = el('div', 'lcbk-fin-acoes');
@@ -3870,7 +3949,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       [bXR, bCR].forEach(function (b) { b.disabled = !doDiaR.length; acR.appendChild(b); }); acR.appendChild(bIR);
       box.insertBefore(acR, box.children[1]);
       box.appendChild(notaFinanceiro(linhas));
-    } else if (FIN.pagos && !FIN.carregando) {
+    } else if (FIN.pagos && (temDados || !FIN.carregando)) {
       var soma = function (k) { return linhas.reduce(function (a, l) { return a + l[k]; }, 0); };
       var kpis = el('div', 'lcbk-fin-kpis');
       [['Compras \u00b7 ' + sub, fmtN(linhas.length)], ['Capital pago', 'R$ ' + brl2(soma('pagoN'))], ['Valor de face', 'R$ ' + brl2(soma('faceN'))]].forEach(function (k) {
@@ -4410,7 +4489,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     // s\u00f3 entram processos em etapas do jur\u00eddico (a menos que "Mostrar outras \u00e1reas" esteja marcado).
     var foraDaArea = 0, foraDoTime = 0;
     var buscando = !!stInst.busca;
-    if ((layoutId === 'comercial' || layoutId === 'juridico' || layoutId === 'diretor' || layoutId === 'financeiro') && lidos.some(function (it) { return it.tipo === 'filho'; })) {
+    if (layoutId === 'financeiro' || ((layoutId === 'comercial' || layoutId === 'juridico' || layoutId === 'diretor') && lidos.some(function (it) { return it.tipo === 'filho'; }))) {
       var velhoF = !FORM.em || FORM.base !== LC.base || Date.now() - FORM.em.getTime() > 10 * 60000;
       if (velhoF && !FORM.carregando && listaPronta() && !(FORM.erro && FORM.base === LC.base)) setTimeout(carregarFormularios, 0);
     }
@@ -4499,6 +4578,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       }
       if (q) achados++;
       buckets[col].push(it);
+      if (L.espelho) { var esp = L.espelho(it); if (esp && esp !== col && buckets[esp]) buckets[esp].push(it); }   // c\u00f3pia, n\u00e3o move
     });
     // Se TODOS os carregados ca\u00edram numa \u00fanica coluna, o total do Zeev PODE ser o total dela,
     // mas s\u00f3 se a lista estiver filtrada por essa etapa. O script n\u00e3o tem como saber isso:
