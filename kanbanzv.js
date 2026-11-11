@@ -3289,7 +3289,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   function moedaBR(n) { return 'R$ ' + Math.round(n).toLocaleString('pt-BR'); }
   var FORM = { porSol: {}, carregando: false, erro: '', em: null, base: '', incompleto: 0 };
-  var FORM_VERSAO = 6;                                         // muda quando a leitura do formul\u00e1rio ganha campos novos
+  var FORM_VERSAO = 7;                                         // muda quando a leitura do formul\u00e1rio ganha campos novos
   function lerFormCsv(txt, por) {
     var linhas = lerCsv(txt);
     if (!linhas.length) return 0;
@@ -3388,6 +3388,14 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       });
       var kc = ix('comprovantePagamentoFundo'), ks = ix('situacaoDoComprovanteDePagamento');
       o.comprovante = (kc >= 0 && !!clean(r[kc])) || (ks >= 0 && /pag|anexad|receb|confirm/i.test(clean(r[ks])));
+      // Valores como o FUNDO registra (conferido com o relat\u00f3rio di\u00e1rio de 10/11):
+      //   Vl. Face = vFA (face adquirida; quando compra s\u00f3 uma fra\u00e7\u00e3o, \u00e9 menor que o vTA) \u2192 vTA
+      //   Vl. Pago = proposta aceita (vSP\u2026 se for uma 2\u00aa proposta de verdade, sen\u00e3o vPP\u2026). O vSP \u00e0s vezes
+      //   repete o valor corrigido (\u2248 face) e n\u00e3o \u00e9 proposta: nesse caso \u00e9 ignorado.
+      var porPadrao = function (re) { for (var k = 0; k < h.length; k++) if (re.test(h[k]) && clean(r[k])) return valorNum(clean(r[k])); return 0; };
+      o.fVFA = porPadrao(/^vFA/i); o.fVTA = porPadrao(/^vTA$/i) || porPadrao(/^vTA/i);
+      o.fVPP = porPadrao(/^vPP/i); o.fVSP = porPadrao(/^vSP/i);
+      o.dtConcl = (function () { var d = lerData(clean(pega(r, ['Data de conclus\u00e3o']))); return d ? d.getTime() : 0; })();
       o.fundo = semDoc(pega(r, F.fundo));
       var corta = function (t) { t = semDoc(t); return t.length > 220 ? t.slice(0, 217) + '\u2026' : t; };
       o.motJur = corta(pega(r, F.motivoJuridico));
@@ -3666,15 +3674,32 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     }
     return modelo ? modelo.href.split(modelo.num).join(sol) : null;
   }
+  var LINKS_SOL = {};
+  function buscarLinkSolicitacao(sol) {                       // pergunta ao Zeev pelo n\u00famero (a lista do financeiro \u00e9 m\u00ednima)
+    if (LINKS_SOL[sol]) return Promise.resolve(LINKS_SOL[sol]);
+    if (!LC.base) return Promise.resolve(null);
+    var u = new URL(LC.base);
+    ['codFlowsOrServices', 'flowStatus', 'startBegin', 'startEnd', 'endBegin', 'endEnd'].forEach(function (k) { u.searchParams.delete(k); });
+    u.searchParams.set('keyword', sol); u.searchParams.set('pagenumber', '1'); u.searchParams.set('recordsperpage', '10');
+    return getJson(nossa(u.href)).then(function (j) {
+      var lote = (j && j.success && j.success.itens) || [], achou = null;
+      lote.forEach(function (x) { var it = daApi(x); if (it.num === sol && it.href) achou = it.href; });
+      if (achou) LINKS_SOL[sol] = achou;
+      return achou;
+    }).catch(function () { return null; });
+  }
   function linkSolicitacao(sol, rotulo) {
     var a = el('a', null, rotulo || '#' + sol), u = hrefDaSolicitacao(sol);
     a.href = u || '#';
     a.title = 'Abrir a solicita\u00e7\u00e3o #' + sol + ' (Ctrl+clique: nova aba)';
     a.addEventListener('click', function (e) {
       e.preventDefault(); e.stopPropagation();
+      var abrir = function (url) { abrirComTecla(e, url, 'Solicita\u00e7\u00e3o #' + sol, function () { location.assign(url); }); };
       var url = hrefDaSolicitacao(sol);
-      if (!url) { alert('N\u00e3o encontrei o endere\u00e7o da solicita\u00e7\u00e3o #' + sol + '. Use a busca do Kanban.'); return; }
-      abrirComTecla(e, url, 'Solicita\u00e7\u00e3o #' + sol, function () { location.assign(url); });
+      if (url) return abrir(url);
+      buscarLinkSolicitacao(sol).then(function (u) {
+        if (u) abrir(u); else alert('N\u00e3o encontrei a solicita\u00e7\u00e3o #' + sol + ' no Zeev. Use a busca do Kanban.');
+      });
     });
     return a;
   }
@@ -3714,21 +3739,30 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (!FIN.pag) return [];
     var P = finPeriodo(), de = P.de, ate1 = new Date(P.ate.getTime() + DIA);
     var vistos = {}, out = [], sols = Object.keys(FIN.pag).concat(Object.keys(FIN.ass || {}));
-    Object.keys(FORM.porSol).forEach(function (k) { if (FORM.porSol[k].dtPag) sols.push(k); });
+    Object.keys(FORM.porSol).forEach(function (k) { var x = FORM.porSol[k]; if (x.dtPag || (x.comprovante && x.dtConcl)) sols.push(k); });
     sols.forEach(function (sol) {
       if (vistos[sol]) return; vistos[sol] = 1;
       var f = FORM.porSol[sol] || {}, d = null, via = '';
       if (f.dtPag) { d = new Date(f.dtPag); via = 'campo'; }
       else if (FIN.pag[sol]) { d = FIN.pag[sol]; via = 'pagamento'; }
+      else if (f.comprovante && f.dtConcl) { d = new Date(f.dtConcl); via = 'conclusao'; }
       else if (f.assOk && f.nProp && /[1-9]/.test(f.nProp) && (FIN.val[sol] || FIN.ass[sol])) { d = FIN.val[sol] || FIN.ass[sol]; via = 'assinatura'; }
       if (d && d >= de && d < ate1) out.push({ sol: sol, pago: d, assin: FIN.ass[sol] || null, via: via });
     });
     return out;
   }
+  function valoresFundo(sol, inf) {
+    var f = FORM.porSol[sol] || {};
+    var face = f.fVFA || f.fVTA || inf.faceN || 0;
+    var valido = function (v) { return v > 0 && (!face || v < face - 1.5); };   // proposta \u00e9 menor que a face
+    var pago = valido(f.fVSP) ? f.fVSP : valido(f.fVPP) ? f.fVPP : (inf.propN || 0);
+    return { face: face, pago: pago };
+  }
   function linhasFinanceiro() {
     return finPagos().map(function (p) {
       var it = { num: p.sol, info: {} }; enriquecer(it);
-      var inf = it.info;
+      var inf = it.info, vf = valoresFundo(p.sol, inf);
+      inf = Object.assign({}, inf, { propN: vf.pago, faceN: vf.face });
       return {
         sol: p.sol, pagoEm: p.pago,
         cols: [ddmmaaaa(p.pago), inf.nProp || '', inf.propN ? brl2(inf.propN) : '', inf.faceN ? brl2(inf.faceN) : '', inf.dtAtu || '',
@@ -3788,8 +3822,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var notas = [];
     var nP = Object.keys(FIN.nomesPago || {}), nA = Object.keys(FIN.nomesAss || {});
     var conta = function (v) { return linhas.filter(function (l) { return l.via === v; }).length; };
-    notas.push('Crit\u00e9rio: ' + conta('campo') + ' pela data do pagamento no formul\u00e1rio \u00b7 ' + conta('pagamento') + ' pela tarefa de pagamento \u00b7 ' +
-      conta('assinatura') + ' por assinatura validada (com n\u00ba de proposta)');
+    notas.push('Crit\u00e9rio: ' + conta('campo') + ' pela data do pagamento no formul\u00e1rio \u00b7 ' + conta('pagamento') + ' pela chegada na T28 \u00b7 ' +
+      conta('conclusao') + ' conclu\u00eddas com comprovante \u00b7 ' + conta('assinatura') + ' por assinatura validada (com n\u00ba de proposta)');
     notas.push('Tarefas de pagamento no log: ' + (nP.length ? nP.join(' \u00b7 ') : 'nenhuma'));
     var dg = FIN.diagPag;
     if (dg) notas.push('Etapa de pagamento: ' + dg.n + ' registro(s) em ' + Object.keys(dg.sols).length + ' negocia\u00e7\u00e3o(\u00f5es), ' + dg.andamento + ' em andamento, ' +
