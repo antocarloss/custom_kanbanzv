@@ -1807,6 +1807,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-rd-chip.is-prc{background:#EEF0FF;color:#030094}',
       '@media print{.lcbk-bar,.lcbk-fin-acoes,.lcbk-seg-wrap,.lcbk-fin-per{display:none!important}}',
       '.lcbk-col[data-col="administrativo"],.lcbk-col[data-col="st_admin"]{--lcbk-cor:#004065}',
+      '.lcbk-area{font-weight:600;color:#003050;min-width:170px}',
       '.lcbk-mais{width:100%;margin-top:4px;background:#fff}',
       '.lcbk-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#404857;cursor:pointer}',
       '.lcbk-chip.is-area{background:#f1f2f5;color:#404857}',
@@ -3212,6 +3213,31 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
 
   var ESTEIRA_INST_PADRAO = { comercial: 'comercial', juridico: 'juridico', triagem: 'triagem' };
   function financeiroLiberado() { return ls(CFG.keys.financeiro) === 'on'; }
+  // Organiza\u00e7\u00e3o do seletor: diretoria \u2192 pipelines. Um pipeline pode aparecer em mais de uma diretoria.
+  var AREAS_PIPE = [
+    { id: 'executiva', nome: 'Diretoria Executiva', itens: [['comercial', 'Comercial'], ['juridico', 'Jur\u00eddico'], ['triagem', 'Triagem']] },
+    { id: 'comercial', nome: 'Diretoria Comercial', itens: [['comercial', 'Pipeline Comercial'], ['diretor', 'Pipeline Diretor Comercial'],
+      ['triagem', 'Pipeline da Triagem'], ['inatividade', 'Pipeline Inatividade'], ['relnovos', 'Pipeline Relacionamento'],
+      ['rejeitados', 'Pipeline Rejeitados'], ['status', 'Pipeline Status']] },
+    { id: 'juridico', nome: 'Diretoria Jur\u00eddico', itens: [['juridico', 'Pipeline Jur\u00eddico']] },
+    { id: 'financeiro', nome: 'Financeiro', itens: [['financeiro', 'Pipeline Financeiro']], so: function () { return financeiroLiberado(); } }
+  ];
+  function areasVisiveis() { return AREAS_PIPE.filter(function (a) { return !a.so || a.so(); }); }
+  function areaDoLayout(lay) {
+    var salva = ls('lcbKanbanAreaSel'), vis = areasVisiveis();
+    var tem = function (a) { return a.itens.some(function (x) { return x[0] === lay; }); };
+    var s0 = vis.filter(function (a) { return a.id === salva && tem(a); })[0];
+    if (s0) return s0.id;
+    var a1 = vis.filter(tem)[0];
+    return a1 ? a1.id : vis[0].id;
+  }
+  function montarPipelines(area) {
+    if (!uiI.layout) return;
+    var A = AREAS_PIPE.filter(function (a) { return a.id === area; })[0] || AREAS_PIPE[0];
+    uiI.layout.replaceChildren();
+    A.itens.forEach(function (x) { if (!LAYOUTS_INST[x[0]]) return; var o = el('option', null, x[1]); o.value = x[0]; uiI.layout.appendChild(o); });
+    uiI.layout.__area = A.id;
+  }
   function layoutInstAtivo() {
     if (stInst.layout === 'financeiro' && !financeiroLiberado()) return ESTEIRA_INST_PADRAO[ls('lcbKanbanArea')] || 'comercial';
     return LAYOUTS_INST[stInst.layout] ? stInst.layout :
@@ -4941,6 +4967,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       b.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
     uiI.tools.style.display = stInst.view === 'kanban' ? '' : 'none';
+    if (uiI.area) {
+      var temNaArea = [].some.call(uiI.layout.options, function (o) { return o.value === layoutId; });
+      if (!temNaArea) { uiI.area.value = areaDoLayout(layoutId); montarPipelines(uiI.area.value); }
+    }
     uiI.layout.value = layoutId;
     uiI.outras.parentNode.style.display = L.esteira ? '' : 'none';
     uiI.outras.checked = stInst.outras;
@@ -4966,14 +4996,22 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     });
     uiI.bar.appendChild(views);
     uiI.tools = el('div', 'lcbk-tools');
+    // \u00c1rea \u2192 Pipeline (os pipelines ficam organizados por diretoria)
+    uiI.area = el('select', 'lcbk-select lcbk-area');
+    uiI.area.setAttribute('aria-label', '\u00c1rea');
+    areasVisiveis().forEach(function (a) { var o = el('option', null, a.nome); o.value = a.id; uiI.area.appendChild(o); });
+    uiI.area.value = areaDoLayout(layoutInstAtivo());
+    uiI.area.addEventListener('change', function () {
+      ls('lcbKanbanAreaSel', uiI.area.value);
+      montarPipelines(uiI.area.value);
+      var primeiro = AREAS_PIPE.filter(function (a) { return a.id === uiI.area.value; })[0].itens[0][0];
+      uiI.layout.value = primeiro;
+      uiI.layout.dispatchEvent(new Event('change'));
+    });
+    uiI.tools.appendChild(uiI.area);
     uiI.layout = el('select', 'lcbk-select');
     uiI.layout.setAttribute('aria-label', 'Disposi\u00e7\u00e3o do Kanban');
-    Object.keys(LAYOUTS_INST).forEach(function (k) {
-      if (k === 'financeiro' && !financeiroLiberado()) return;       // s\u00f3 para quem foi liberado
-      var o = el('option', null, LAYOUTS_INST[k].nome);
-      o.value = k;
-      uiI.layout.appendChild(o);
-    });
+    montarPipelines(uiI.area.value);
     uiI.layout.addEventListener('change', function () {
       stInst.layout = uiI.layout.value;
       stInst.etapa = '';
