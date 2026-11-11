@@ -1808,6 +1808,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '@media print{.lcbk-bar,.lcbk-fin-acoes,.lcbk-seg-wrap,.lcbk-fin-per{display:none!important}}',
       '.lcbk-col[data-col="administrativo"],.lcbk-col[data-col="st_admin"]{--lcbk-cor:#004065}',
       '.lcbk-area{font-weight:600;color:#003050;min-width:170px}',
+      '.lcbk-campo{display:inline-flex;flex-direction:column;gap:2px;margin:0}',
+      '.lcbk-rot{font-family:"Outfit","Montserrat",system-ui,sans-serif;font-weight:500;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#5B6B7F;padding-left:2px}',
       '.lcbk-mais{width:100%;margin-top:4px;background:#fff}',
       '.lcbk-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#404857;cursor:pointer}',
       '.lcbk-chip.is-area{background:#f1f2f5;color:#404857}',
@@ -5008,7 +5010,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       uiI.layout.value = primeiro;
       uiI.layout.dispatchEvent(new Event('change'));
     });
-    uiI.tools.appendChild(uiI.area);
+    var rotulado = function (txt, sel) {
+      var w = el('label', 'lcbk-campo'); w.appendChild(el('span', 'lcbk-rot', txt)); w.appendChild(sel); return w;
+    };
+    uiI.tools.appendChild(rotulado('\u00c1reas', uiI.area));
     uiI.layout = el('select', 'lcbk-select');
     uiI.layout.setAttribute('aria-label', 'Disposi\u00e7\u00e3o do Kanban');
     montarPipelines(uiI.area.value);
@@ -5019,7 +5024,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       ls(CFG.keys.layoutInst, stInst.layout);
       renderInst();
     });
-    uiI.tools.appendChild(uiI.layout);
+    uiI.tools.appendChild(rotulado('Pipeline', uiI.layout));
     uiI.fEtapa = el('select', 'lcbk-select');
     uiI.fEtapa.setAttribute('aria-label', 'Mostrar s\u00f3 uma etapa');
     uiI.fEtapa.addEventListener('change', function () { stInst.etapa = uiI.fEtapa.value; renderInst(); });
