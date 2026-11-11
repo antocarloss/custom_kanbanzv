@@ -3554,6 +3554,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   // A planilha sai no modelo de importa\u00e7\u00e3o do financeiro (aba "Ativos").
   var FIN_CFG = {
     tarefaPago: /auditar\s+pagamento|comprovante|pagamento|pago\b/i,
+    tarefaCompra: /acompanhar\s+finaliza[c\u00e7][a\u00e3]o\s+da\s+compra/i,   // T27: chegou aqui = comprado e pago
     tarefaAssinatura: /assinatura/i,
     tarefaValidacao: /validar\s+assinatura/i,
     janelaDias: 150                                   // negocia\u00e7\u00f5es abertas at\u00e9 150 dias antes do per\u00edodo
@@ -3584,7 +3585,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var t = {}; Object.keys(FIN.t28 || {}).forEach(function (k) { var x = FIN.t28[k]; t[k] = [x.chegada ? +x.chegada : 0, x.final ? +x.final : 0, x.aberta ? 1 : 0]; });
       var dg = FIN.diagPag ? { n: FIN.diagPag.n, andamento: FIN.diagPag.andamento, semData: FIN.diagPag.semData, min: FIN.diagPag.min ? +FIN.diagPag.min : 0,
                               max: FIN.diagPag.max ? +FIN.diagPag.max : 0, sols: FIN.diagPag.sols } : null;
-      localStorage.setItem(CHAVE_FIN, JSON.stringify({ chave: FIN.chave, em: +FIN.em, pag: ms(FIN.pag), ass: ms(FIN.ass), val: ms(FIN.val), t28: t,
+      localStorage.setItem(CHAVE_FIN, JSON.stringify({ v: 2, chave: FIN.chave, em: +FIN.em, compra: ms(FIN.compra), nomesCompra: FIN.nomesCompra, pag: ms(FIN.pag), ass: ms(FIN.ass), val: ms(FIN.val), t28: t,
         nomesPago: FIN.nomesPago, nomesAss: FIN.nomesAss, diagPag: dg }));
     } catch (e) { /* sem espa\u00e7o: segue sem c\u00f3pia */ }
   }
@@ -3592,8 +3593,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (FIN.em) return;
     try {
       var c = JSON.parse(localStorage.getItem(CHAVE_FIN) || 'null');
-      if (!c || c.chave !== finChave() || Date.now() - c.em > 12 * 3600000) return;
+      if (!c || c.v !== 2 || c.chave !== finChave() || Date.now() - c.em > 12 * 3600000) return;
       var dt = function (m) { var o = {}; Object.keys(m || {}).forEach(function (k) { o[k] = m[k] ? new Date(m[k]) : null; }); return o; };
+      FIN.compra = dt(c.compra); FIN.nomesCompra = c.nomesCompra || {};
       FIN.pag = dt(c.pag); FIN.ass = dt(c.ass); FIN.val = dt(c.val); FIN.t28 = {};
       Object.keys(c.t28 || {}).forEach(function (k) { var x = c.t28[k]; FIN.t28[k] = { chegada: x[0] ? new Date(x[0]) : null, final: x[1] ? new Date(x[1]) : null, aberta: !!x[2] }; });
       FIN.nomesPago = c.nomesPago || {}; FIN.nomesAss = c.nomesAss || {};
@@ -3625,11 +3627,18 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       });
     })();
     function fim() {
-      var ate1 = new Date(P.ate.getTime() + DIA), pag = {}, ass = {}, val = {}, t28 = {};
-      FIN.diagPag = null;
+      var ate1 = new Date(P.ate.getTime() + DIA), pag = {}, ass = {}, val = {}, t28 = {}, compra = {};
+      FIN.diagPag = null; FIN.nomesCompra = {};
       FIN.nomesPago = {}; FIN.nomesAss = {};
       acc.forEach(function (x) {
         if (!x.sol) return;
+        if (FIN_CFG.tarefaCompra.test(x.nome || '') && (x.rec || x.fin)) {
+          FIN.nomesCompra = FIN.nomesCompra || {};
+          FIN.nomesCompra[x.nome] = (FIN.nomesCompra[x.nome] || 0) + 1;
+          var dC = x.rec || x.fin;
+          if (!compra[x.sol] || dC < compra[x.sol]) compra[x.sol] = dC;     // 1\u00aa chegada na T27 = data da compra
+          return;
+        }
         // Etapa de pagamento (ex.: "T28-Auditar Pagamento"): a negocia\u00e7\u00e3o CHEGA nela quando o fundo paga.
         // Data = a 1\u00aa chegada (recebimento) da tarefa, finalizada ou n\u00e3o.
         if (FIN_CFG.tarefaPago.test(x.nome || '')) {
@@ -3654,7 +3663,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
           if (FIN_CFG.tarefaValidacao.test(x.nome || '') && (!val[x.sol] || x.fin > val[x.sol])) val[x.sol] = x.fin;
         }
       });
-      FIN.pag = pag; FIN.ass = ass; FIN.val = val; FIN.t28 = t28;
+      FIN.pag = pag; FIN.ass = ass; FIN.val = val; FIN.t28 = t28; FIN.compra = compra;
       FIN.pagos = [];                                                     // calculado na tela (finPagos)
       FIN.em = new Date(); FIN.carregando = false; FIN.prog = ''; FIN.daCopia = false;
       acc = null;
@@ -3738,12 +3747,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function finPagos() {
     if (!FIN.pag) return [];
     var P = finPeriodo(), de = P.de, ate1 = new Date(P.ate.getTime() + DIA);
-    var vistos = {}, out = [], sols = Object.keys(FIN.pag).concat(Object.keys(FIN.ass || {}));
+    var vistos = {}, out = [], sols = Object.keys(FIN.compra || {}).concat(Object.keys(FIN.pag), Object.keys(FIN.ass || {}));
     Object.keys(FORM.porSol).forEach(function (k) { var x = FORM.porSol[k]; if (x.dtPag || (x.comprovante && x.dtConcl)) sols.push(k); });
     sols.forEach(function (sol) {
       if (vistos[sol]) return; vistos[sol] = 1;
       var f = FORM.porSol[sol] || {}, d = null, via = '';
       if (f.dtPag) { d = new Date(f.dtPag); via = 'campo'; }
+      else if (FIN.compra && FIN.compra[sol]) { d = FIN.compra[sol]; via = 'compra'; }
       else if (FIN.pag[sol]) { d = FIN.pag[sol]; via = 'pagamento'; }
       else if (f.comprovante && f.dtConcl) { d = new Date(f.dtConcl); via = 'conclusao'; }
       else if (f.assOk && f.nProp && /[1-9]/.test(f.nProp) && (FIN.val[sol] || FIN.ass[sol])) { d = FIN.val[sol] || FIN.ass[sol]; via = 'assinatura'; }
@@ -3820,9 +3830,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   function notaFinanceiro(linhas) {
     var notas = [];
-    var nP = Object.keys(FIN.nomesPago || {}), nA = Object.keys(FIN.nomesAss || {});
+    var nP = Object.keys(FIN.nomesPago || {}), nA = Object.keys(FIN.nomesAss || {}), nC = Object.keys(FIN.nomesCompra || {});
+    notas.push('Tarefa de compra no log: ' + (nC.length ? nC.join(' \u00b7 ') : 'nenhuma'));
     var conta = function (v) { return linhas.filter(function (l) { return l.via === v; }).length; };
-    notas.push('Crit\u00e9rio: ' + conta('campo') + ' pela data do pagamento no formul\u00e1rio \u00b7 ' + conta('pagamento') + ' pela chegada na T28 \u00b7 ' +
+    notas.push('Crit\u00e9rio: ' + conta('campo') + ' pela data do pagamento no formul\u00e1rio \u00b7 ' + conta('compra') + ' pela chegada na T27 (finaliza\u00e7\u00e3o da compra) \u00b7 ' +
+      conta('pagamento') + ' pela chegada na T28 \u00b7 ' +
       conta('conclusao') + ' conclu\u00eddas com comprovante \u00b7 ' + conta('assinatura') + ' por assinatura validada (com n\u00ba de proposta)');
     notas.push('Tarefas de pagamento no log: ' + (nP.length ? nP.join(' \u00b7 ') : 'nenhuma'));
     var dg = FIN.diagPag;
