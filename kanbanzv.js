@@ -393,7 +393,29 @@
 
   // \u2500\u2500 Ativa\u00e7\u00e3o sem link (app do Zeev para computador, sem barra de endere\u00e7o):
   //    digitar na busca do Kanban "lcb:dashboard" (ou "lcb:dashboard off", "lcb:gestor", "lcb:gestor off") \u2500\u2500
+  function diagnosticoFin(txt) {
+    var m = String(txt || '').trim().match(/^lcb:fin\s+(\d+)$/i);
+    if (!m) return false;
+    var alvo = m[1], achou = [];
+    Object.keys(FORM.porSol).forEach(function (sol) {
+      var f = FORM.porSol[sol];
+      if (sol === alvo || (f.props || []).indexOf(alvo) !== -1 || f.nProp === alvo) achou.push(sol);
+    });
+    if (!achou.length) { alert('Proposta/solicita\u00e7\u00e3o ' + alvo + ' n\u00e3o est\u00e1 nos formul\u00e1rios lidos (' + Object.keys(FORM.porSol).length + ').'); return true; }
+    var dd = function (x) { return x ? ddmmaaaa(new Date(x)) : '\u2014'; };
+    alert(achou.map(function (sol) {
+      var f = FORM.porSol[sol];
+      return 'Solicita\u00e7\u00e3o #' + sol + ' \u00b7 proposta ' + (f.nProp || '\u2014') +
+        '\nData do pagamento (campo): ' + dd(f.dtPag) +
+        '\nComprovante anexado: ' + (f.comprovante ? 'sim' : 'n\u00e3o') + ' \u00b7 conclus\u00e3o: ' + dd(f.dtConcl) +
+        '\nChegada na T27: ' + dd(FIN.compra && FIN.compra[sol]) + ' \u00b7 chegada na T28: ' + dd(FIN.pag && FIN.pag[sol]) +
+        '\nAssinatura validada: ' + dd(FIN.val && (FIN.val[sol] || FIN.ass[sol])) +
+        '\nValores (fundo): pago ' + brl2(valoresFundo(sol, {}).pago) + ' \u00b7 face ' + brl2(valoresFundo(sol, {}).face);
+    }).join('\n\n'));
+    return true;
+  }
   function comandoAtivacao(txt) {
+    if (diagnosticoFin(txt)) return true;
     var fm = String(txt || '').trim().match(/^lcb:financeiro(?:\s+(\S+))?$/i);
     if (fm) {
       if (fm[1] && fm[1].toLowerCase() === 'off') {
@@ -477,7 +499,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-11b';
+  var VERSAO = '2026-11-11c';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -3776,10 +3798,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     sols.forEach(function (sol) {
       if (vistos[sol]) return; vistos[sol] = 1;
       var f = FORM.porSol[sol] || {}, d = null, via = '';
+      // ordem: campo > conclu\u00edda com comprovante (bateu com o fundo: 1924 em 10/11) > T27 > T28
       if (f.dtPag) { d = new Date(f.dtPag); via = 'campo'; }
+      else if (f.comprovante && f.dtConcl) { d = new Date(f.dtConcl); via = 'conclusao'; }
       else if (FIN.compra && FIN.compra[sol]) { d = FIN.compra[sol]; via = 'compra'; }
       else if (FIN.pag[sol]) { d = FIN.pag[sol]; via = 'pagamento'; }
-      else if (f.comprovante && f.dtConcl) { d = new Date(f.dtConcl); via = 'conclusao'; }
       else if (f.assOk && f.nProp && /[1-9]/.test(f.nProp) && (FIN.val[sol] || FIN.ass[sol])) {
         var dA = FIN.val[sol] || FIN.ass[sol];                 // assinatura validada N\u00c3O \u00e9 pagamento: s\u00f3 conta no aviso
         if (dA >= de && dA < ate1) FIN.soAssinatura = (FIN.soAssinatura || 0) + 1;
