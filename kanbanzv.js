@@ -477,7 +477,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-10c';
+  var VERSAO = '2026-11-11a';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -3459,7 +3459,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       }).then(prox);
     }
     prox().then(function () {
-      if (FORM.base === base) Object.keys(por).forEach(function (k) { FORM.porSol[k] = por[k]; });   // junta: não apaga o que o financeiro leu
+      if (FORM.base === base) Object.keys(por).forEach(function (k) { FORM.porSol[k] = por[k]; });   // junta: n\u00e3o apaga o que o financeiro leu
       else FORM.porSol = por;
       FORM.em = new Date(); FORM.base = base; setTimeout(salvarCache, 0);
     })
@@ -3771,6 +3771,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (!FIN.pag) return [];
     var P = finPeriodo(), de = P.de, ate1 = new Date(P.ate.getTime() + DIA);
     var vistos = {}, out = [], sols = Object.keys(FIN.compra || {}).concat(Object.keys(FIN.pag), Object.keys(FIN.ass || {}));
+    FIN.soAssinatura = 0;
     Object.keys(FORM.porSol).forEach(function (k) { var x = FORM.porSol[k]; if (x.dtPag || (x.comprovante && x.dtConcl)) sols.push(k); });
     sols.forEach(function (sol) {
       if (vistos[sol]) return; vistos[sol] = 1;
@@ -3779,7 +3780,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       else if (FIN.compra && FIN.compra[sol]) { d = FIN.compra[sol]; via = 'compra'; }
       else if (FIN.pag[sol]) { d = FIN.pag[sol]; via = 'pagamento'; }
       else if (f.comprovante && f.dtConcl) { d = new Date(f.dtConcl); via = 'conclusao'; }
-      else if (f.assOk && f.nProp && /[1-9]/.test(f.nProp) && (FIN.val[sol] || FIN.ass[sol])) { d = FIN.val[sol] || FIN.ass[sol]; via = 'assinatura'; }
+      else if (f.assOk && f.nProp && /[1-9]/.test(f.nProp) && (FIN.val[sol] || FIN.ass[sol])) {
+        var dA = FIN.val[sol] || FIN.ass[sol];                 // assinatura validada N\u00c3O \u00e9 pagamento: s\u00f3 conta no aviso
+        if (dA >= de && dA < ate1) FIN.soAssinatura = (FIN.soAssinatura || 0) + 1;
+      }
       if (d && d >= de && d < ate1) out.push({ sol: sol, pago: d, assin: FIN.ass[sol] || null, via: via });
     });
     return out;
@@ -3858,7 +3862,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var conta = function (v) { return linhas.filter(function (l) { return l.via === v; }).length; };
     notas.push('Crit\u00e9rio: ' + conta('campo') + ' pela data do pagamento no formul\u00e1rio \u00b7 ' + conta('compra') + ' pela chegada na T27 (finaliza\u00e7\u00e3o da compra) \u00b7 ' +
       conta('pagamento') + ' pela chegada na T28 \u00b7 ' +
-      conta('conclusao') + ' conclu\u00eddas com comprovante \u00b7 ' + conta('assinatura') + ' por assinatura validada (com n\u00ba de proposta)');
+      conta('conclusao') + ' conclu\u00eddas com comprovante');
+    if (FIN.soAssinatura) notas.push(FIN.soAssinatura + ' negocia\u00e7\u00e3o(\u00f5es) com assinatura validada no per\u00edodo, sem confirma\u00e7\u00e3o de pagamento no Zeev (n\u00e3o inclu\u00eddas)');
     notas.push('Tarefas de pagamento no log: ' + (nP.length ? nP.join(' \u00b7 ') : 'nenhuma'));
     var dg = FIN.diagPag;
     if (dg) notas.push('Etapa de pagamento: ' + dg.n + ' registro(s) em ' + Object.keys(dg.sols).length + ' negocia\u00e7\u00e3o(\u00f5es), ' + dg.andamento + ' em andamento, ' +
@@ -4003,6 +4008,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     }
     var sub = ddmmaaaa(P.de) === ddmmaaaa(P.ate) ? ddmmaaaa(P.de) : ddmmaaaa(P.de) + ' a ' + ddmmaaaa(P.ate);
     var temDados = FIN.pag && FIN.chave === chave;
+    if (FINFORM.carregando && !FIN.carregando) box.appendChild(el('p', 'lcbk-fin-msg', 'Lendo os formul\u00e1rios das negocia\u00e7\u00f5es do per\u00edodo (valores, comprovante e conclus\u00e3o)\u2026 a lista vai se completar sozinha.'));
     if (FIN.carregando) box.appendChild(el('p', 'lcbk-fin-msg', temDados ? 'Atualizando\u2026 (mostrando a \u00faltima leitura, de ' + FIN.em.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + ')' : (FIN.prog || 'Lendo o log de tarefas\u2026')));
     else if (FIN.erro) box.appendChild(el('p', 'lcbk-fin-msg is-erro', 'N\u00e3o foi poss\u00edvel ler o log de tarefas (' + FIN.erro + ').'));
     if (FIN.pagos && (temDados || !FIN.carregando) && finModo() === 'relatorio') {
