@@ -477,7 +477,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-11a';
+  var VERSAO = '2026-11-11b';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -3624,7 +3624,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         setTimeout(salvarCache, 0);
         return renderInst();
       }
-      lerFormPai(fl[i++], {}, ini, hoje, por).then(prox, function (e) { FINFORM.erro = (e && e.message) || 'erro'; prox(); });
+      lerFormPai(fl[i++], { limpo: true }, ini, hoje, por).then(prox, function (e) { FINFORM.erro = (e && e.message) || 'erro'; prox(); });
     })();
   }
   function carregarFinanceiro() {
@@ -3870,6 +3870,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       dg.semData + ' sem data' + (dg.min ? ', chegadas de ' + ddmmaaaa(dg.min) + ' a ' + ddmmaaaa(dg.max) : ''));
     notas.push('Tarefas de assinatura no log: ' + (nA.length ? nA.join(' \u00b7 ') : 'nenhuma'));
     if (FINFORM.carregando) notas.push('Lendo os formul\u00e1rios das negocia\u00e7\u00f5es do per\u00edodo (valores e datas)\u2026');
+    else if (FINFORM.em) {
+      var nCc = 0, nF = 0; Object.keys(FORM.porSol).forEach(function (k) { var x = FORM.porSol[k]; nF++; if (x.comprovante && x.dtConcl) nCc++; });
+      notas.push('Formul\u00e1rios lidos: ' + fmtN(nF) + ' (' + nCc + ' conclu\u00eddas com comprovante)' + (FINFORM.erro ? ' \u00b7 erro: ' + FINFORM.erro : ''));
+    }
     if (!FORM.em) notas.push('Aguarde "lendo valores das negocia\u00e7\u00f5es\u2026": o crit\u00e9rio das assinaturas depende do formul\u00e1rio.');
     if (linhas.some(function (l) { return !l.temForm; })) notas.push('Linhas em cinza: valores do formul\u00e1rio ainda n\u00e3o lidos.');
     if (FIN.incompleto) notas.push('Aten\u00e7\u00e3o: parte do log veio cortada pelo Zeev (' + FIN.incompleto + ' dia(s) com mais de 1.000 tarefas).');
@@ -4080,6 +4084,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var u = new URL(LC.base || baseDe(LC.url));
     u.pathname = u.pathname.replace(/\/instances\/?$/, '/instances/export/requests/csvsemicolon');
     ['pagenumber', 'recordsperpage', 'keyword', 'flowStatus', 'startBegin', 'startEnd', 'endBegin', 'endEnd'].forEach(function (k) { u.searchParams.delete(k); });
+    if (q.limpo) {                                             // s\u00f3 permiss\u00e3o + fluxo + per\u00edodo: sem os filtros da lista
+      var rt = u.searchParams.get('reportType') || 'ihavepermission';
+      u = new URL(u.origin + u.pathname);
+      u.searchParams.set('reportType', rt);
+    }
     u.searchParams.set('codFlowsOrServices', fluxo[0] + ';' + fluxo[1] + ';0;0');
     if (q.flowStatus) u.searchParams.set('flowStatus', q.flowStatus);
     u.searchParams.set('startBegin', ddmmaaaa(ini)); u.searchParams.set('startEnd', ddmmaaaa(fim));
