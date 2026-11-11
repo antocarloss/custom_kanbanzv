@@ -2394,8 +2394,27 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     financeiro: {
       nome: 'Financeiro \u00b7 fechados e pagos no dia',
       esteira: 'juridico',
-      cols: function () { return [{ id: 'pagos', name: 'Pagos' }, { id: 'outros', name: 'Outras \u00e1reas', opcional: true, outras: true }]; },
-      place: function () { return 'outros'; }
+      cols: function () {
+        return [
+          { id: 'fin_auditar', name: 'Auditar pagamento (T28)', dica: 'compra finalizada, aguardando a auditoria do financeiro' },
+          { id: 'fin_problema', name: 'Problema no pagamento', dica: 'voltou da T28 com problema', alert: true },
+          { id: 'fin_ok', name: 'Pagamento confirmado', dica: 'passou da T28 (confirmado), compra finalizada no per\u00edodo', ok: true, encerrada: true },
+          { id: 'outros', name: 'Outras \u00e1reas', opcional: true, outras: true }
+        ];
+      },
+      place: function (it) {
+        if (it.tipo !== 'filho') return 'outros';
+        var cod = codigoDe(it.atividade), n = parseFloat(String(cod).replace(/^T/i, '')) || 0;
+        if (it.ativo && /^T28$/i.test(cod)) return 'fin_auditar';
+        var t = FIN.t28 && FIN.t28[it.num];
+        if (!t) return 'outros';
+        if (it.ativo && n && n < 28) return 'fin_problema';                       // voltou para antes da T28
+        if (!t.aberta && (!it.ativo ? !perdida(it) : n > 28)) {
+          var P = finPeriodo(), d = t.chegada;
+          return d && d >= P.de && d < new Date(P.ate.getTime() + DIA) ? 'fin_ok' : 'outros';
+        }
+        return 'outros';
+      }
     },
     inatividade: layoutPorMes('Inatividade (PPP de meses anteriores)', 'ppp'),
     relnovos: layoutPorMes('Relacionamento Novos (PPF de meses anteriores)', 'ppf'),
@@ -2614,7 +2633,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   // Inatividade e Relacionamento Novos olham todos os meses: ignoram o filtro de per\u00edodo
   function periodoEfetivo() {
     var lay = layoutInstAtivo();
-    return lay === 'inatividade' || lay === 'relnovos' ? '' : (stInst.periodo || '');
+    return lay === 'inatividade' || lay === 'relnovos' || lay === 'financeiro' ? '' : (stInst.periodo || '');   // financeiro: o período é o da própria visão
   }
   function nomePeriodo(k) { for (var i = 0; i < PERIODOS.length; i++) if (PERIODOS[i][0] === k) return PERIODOS[i][1]; return ''; }
   function intervaloPeriodo(k) {
@@ -3473,13 +3492,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   // Data de Assinatura = finaliza\u00e7\u00e3o da \u00faltima tarefa de assinatura. Valores v\u00eam do formul\u00e1rio.
   // A planilha sai no modelo de importa\u00e7\u00e3o do financeiro (aba "Ativos").
   var FIN_CFG = {
-    tarefaPago: /comprovante|pagamento|pago\b/i,
+    tarefaPago: /auditar\s+pagamento|comprovante|pagamento|pago\b/i,
     tarefaAssinatura: /assinatura/i,
     tarefaValidacao: /validar\s+assinatura/i,
     janelaDias: 150                                   // negocia\u00e7\u00f5es abertas at\u00e9 150 dias antes do per\u00edodo
   };
   var FIN = { carregando: false, erro: '', em: null, chave: '', pagos: null, semData: 0, nomesPago: {}, nomesAss: {}, consultas: 0, incompleto: 0, prog: '' };
-  function finModo() { return ls('lcbKanbanFinModo') === 'relatorio' ? 'relatorio' : 'planilha'; }
+  function finModo() { var m = ls('lcbKanbanFinModo'); return m === 'relatorio' || m === 'kanban' ? m : 'planilha'; }
   function finDia() { var hoje = new Date(); hoje.setHours(0, 0, 0, 0); return (stInst.finDia && lerData(stInst.finDia)) || hoje; }
   function finPeriodo() {
     var hoje = new Date(); hoje.setHours(0, 0, 0, 0);
@@ -3520,7 +3539,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       });
     })();
     function fim() {
-      var ate1 = new Date(P.ate.getTime() + DIA), pag = {}, ass = {}, val = {};
+      var ate1 = new Date(P.ate.getTime() + DIA), pag = {}, ass = {}, val = {}, t28 = {};
       FIN.diagPag = null;
       FIN.nomesPago = {}; FIN.nomesAss = {};
       acc.forEach(function (x) {
@@ -3538,7 +3557,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         if (FIN_CFG.tarefaPago.test(x.nome || '') && (x.rec || x.fin)) {
           FIN.nomesPago[x.nome] = (FIN.nomesPago[x.nome] || 0) + 1;
           var dP = x.rec || x.fin;
-          if (!pag[x.sol] || dP < pag[x.sol]) pag[x.sol] = dP;
+          if (!pag[x.sol] || dP > pag[x.sol]) pag[x.sol] = dP;              // \u00faltima chegada = "Compra Finalizada"
+          var t = t28[x.sol] || (t28[x.sol] = { chegada: null, final: null, aberta: false });
+          if (!t.chegada || dP > t.chegada) { t.chegada = dP; t.final = x.fin || null; t.aberta = !x.fin; }
         }
         if (!x.fin) return;
         if (FIN_CFG.tarefaAssinatura.test(x.nome || '')) {
@@ -3547,7 +3568,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
           if (FIN_CFG.tarefaValidacao.test(x.nome || '') && (!val[x.sol] || x.fin > val[x.sol])) val[x.sol] = x.fin;
         }
       });
-      FIN.pag = pag; FIN.ass = ass; FIN.val = val;
+      FIN.pag = pag; FIN.ass = ass; FIN.val = val; FIN.t28 = t28;
       FIN.pagos = [];                                                     // calculado na tela (finPagos)
       FIN.em = new Date(); FIN.carregando = false; FIN.prog = '';
       acc = null;
@@ -3778,9 +3799,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (!FIN.carregando && LC.base && (FIN.chave !== chave || !FIN.em || Date.now() - FIN.em.getTime() > 10 * 60000) && !(FIN.erro && FIN.chave === chave)) setTimeout(carregarFinanceiro, 0);
     var box = el('div', 'lcbk-fin');
     var topo = el('div', 'lcbk-fin-top');
-    topo.appendChild(el('h2', null, finModo() === 'relatorio' ? 'Relat\u00f3rio Di\u00e1rio \u00b7 FIDC LCB I & II' : 'Financeiro \u00b7 fechados e pagos'));
+    topo.appendChild(el('h2', null, finModo() === 'relatorio' ? 'Relat\u00f3rio Di\u00e1rio \u00b7 FIDC LCB I & II' : finModo() === 'kanban' ? 'Financeiro \u00b7 auditoria de pagamento' : 'Financeiro \u00b7 fechados e pagos'));
     var modos = el('div', 'lcbk-seg-wrap');
-    [['planilha', 'Planilha de importa\u00e7\u00e3o'], ['relatorio', 'Relat\u00f3rio di\u00e1rio']].forEach(function (m) {
+    [['kanban', 'Kanban (T28)'], ['planilha', 'Planilha de importa\u00e7\u00e3o'], ['relatorio', 'Relat\u00f3rio di\u00e1rio']].forEach(function (m) {
       var b = el('button', 'lcbk-seg' + (finModo() === m[0] ? ' is-on' : ''), m[1]); b.type = 'button';
       b.addEventListener('click', function () { ls('lcbKanbanFinModo', m[0]); renderInst(); });
       modos.appendChild(b);
@@ -3821,6 +3842,14 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     topo.appendChild(per);
     box.appendChild(topo);
     var linhas = FIN.pagos ? linhasFinanceiro() : [];
+    if (finModo() === 'kanban') {
+      if (FIN.carregando) box.appendChild(el('p', 'lcbk-fin-msg', FIN.prog || 'Lendo o log de tarefas\u2026'));
+      else box.appendChild(el('p', 'lcbk-fin-nota', '"Pagamento confirmado" mostra as compras finalizadas (chegada na T28) no per\u00edodo escolhido. Clique no card para abrir a negocia\u00e7\u00e3o.'));
+      var assinK = ['kanban', stInst.finDe, stInst.finAte, FIN.carregando, FIN.prog, FIN.em && FIN.em.getTime()].join('|');
+      if (uiI.fin.__assin === assinK && uiI.fin.firstChild) return;
+      uiI.fin.__assin = assinK; uiI.fin.replaceChildren(box);
+      return;
+    }
     var sub = ddmmaaaa(P.de) === ddmmaaaa(P.ate) ? ddmmaaaa(P.de) : ddmmaaaa(P.de) + ' a ' + ddmmaaaa(P.ate);
     if (FIN.carregando) box.appendChild(el('p', 'lcbk-fin-msg', FIN.prog || 'Lendo o log de tarefas\u2026'));
     else if (FIN.erro) box.appendChild(el('p', 'lcbk-fin-msg is-erro', 'N\u00e3o foi poss\u00edvel ler o log de tarefas (' + FIN.erro + ').'));
@@ -4644,7 +4673,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     }
     renderPainel(lidos, completo, totalZeev());
     renderFinanceiro();
-    var ehFin = layoutId === 'financeiro';
+    var ehFin = layoutId === 'financeiro' && finModo() !== 'kanban';
     uiI.board.style.display = ehFin ? 'none' : '';
     if (ehFin) { uiI.resumo.style.display = 'none'; uiI.aviso.style.display = 'none'; if (uiI.matriz) uiI.matriz.style.display = 'none'; }
     if (uiI.btnPainel) {
