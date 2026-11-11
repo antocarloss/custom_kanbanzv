@@ -3458,7 +3458,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         if (n >= CFG.producao.limiteLinhas) FORM.incompleto++;
       }).then(prox);
     }
-    prox().then(function () { FORM.porSol = por; FORM.em = new Date(); FORM.base = base; setTimeout(salvarCache, 0); })
+    prox().then(function () {
+      if (FORM.base === base) Object.keys(por).forEach(function (k) { FORM.porSol[k] = por[k]; });   // junta: não apaga o que o financeiro leu
+      else FORM.porSol = por;
+      FORM.em = new Date(); FORM.base = base; setTimeout(salvarCache, 0);
+    })
       .catch(function (e) { FORM.erro = (e && e.message) || 'erro'; })
       .then(function () { FORM.carregando = false; if (uiI.board) renderInst(); });
   }
@@ -3603,6 +3607,25 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
                                  max: c.diagPag.max ? new Date(c.diagPag.max) : null, sols: c.diagPag.sols || {} } : null;
       FIN.chave = c.chave; FIN.em = new Date(c.em); FIN.pagos = []; FIN.daCopia = true;
     } catch (e) { /* c\u00f3pia inv\u00e1lida: l\u00ea de novo */ }
+  }
+  // Valores do formul\u00e1rio para o financeiro: o export por fluxo corta em 1.000 linhas, e as negocia\u00e7\u00f5es
+  // conclu\u00eddas/antigas ficavam de fora. Aqui l\u00ea por per\u00edodo (dividindo at\u00e9 caber), todas as situa\u00e7\u00f5es.
+  var FINFORM = { chave: '', carregando: false, em: null, erro: '' };
+  function carregarFormFinanceiro() {
+    if (FINFORM.carregando || !LC.base) return;
+    var J = finJanela(), hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    var ini = new Date(J.de.getTime() - FIN_CFG.janelaDias * DIA), chave = finChave();
+    FINFORM.carregando = true; FINFORM.erro = ''; FINFORM.chave = chave;
+    var fl = fluxosNegociacao(), i = 0, por = {};
+    (function prox() {
+      if (i >= fl.length) {
+        FINFORM.carregando = false; FINFORM.em = new Date();
+        if (!FORM.em) FORM.em = new Date();
+        setTimeout(salvarCache, 0);
+        return renderInst();
+      }
+      lerFormPai(fl[i++], {}, ini, hoje, por).then(prox, function (e) { FINFORM.erro = (e && e.message) || 'erro'; prox(); });
+    })();
   }
   function carregarFinanceiro() {
     if (FIN.carregando) return;
@@ -3841,6 +3864,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (dg) notas.push('Etapa de pagamento: ' + dg.n + ' registro(s) em ' + Object.keys(dg.sols).length + ' negocia\u00e7\u00e3o(\u00f5es), ' + dg.andamento + ' em andamento, ' +
       dg.semData + ' sem data' + (dg.min ? ', chegadas de ' + ddmmaaaa(dg.min) + ' a ' + ddmmaaaa(dg.max) : ''));
     notas.push('Tarefas de assinatura no log: ' + (nA.length ? nA.join(' \u00b7 ') : 'nenhuma'));
+    if (FINFORM.carregando) notas.push('Lendo os formul\u00e1rios das negocia\u00e7\u00f5es do per\u00edodo (valores e datas)\u2026');
     if (!FORM.em) notas.push('Aguarde "lendo valores das negocia\u00e7\u00f5es\u2026": o crit\u00e9rio das assinaturas depende do formul\u00e1rio.');
     if (linhas.some(function (l) { return !l.temForm; })) notas.push('Linhas em cinza: valores do formul\u00e1rio ainda n\u00e3o lidos.');
     if (FIN.incompleto) notas.push('Aten\u00e7\u00e3o: parte do log veio cortada pelo Zeev (' + FIN.incompleto + ' dia(s) com mais de 1.000 tarefas).');
@@ -3922,6 +3946,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (!ativo) return;
     restaurarFin();
     var P = finPeriodo(), chave = finChave();
+    if (!FINFORM.carregando && LC.base && FINFORM.chave !== chave) setTimeout(carregarFormFinanceiro, 0);
     if (!FIN.carregando && LC.base && (FIN.chave !== chave || !FIN.em || Date.now() - FIN.em.getTime() > 10 * 60000) && !(FIN.erro && FIN.chave === chave)) setTimeout(carregarFinanceiro, 0);
     var box = el('div', 'lcbk-fin');
     var topo = el('div', 'lcbk-fin-top');
@@ -4036,7 +4061,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       t.appendChild(tb); sc.appendChild(t); box.appendChild(sc);
       box.appendChild(notaFinanceiro(linhas));
     }
-    var assin = [finModo(), stInst.finDe, stInst.finAte, stInst.finDia, FIN.carregando, FIN.prog, FIN.erro, FIN.em && FIN.em.getTime(),
+    var assin = [finModo(), stInst.finDe, stInst.finAte, stInst.finDia, FIN.carregando, FIN.prog, FIN.erro, FIN.em && FIN.em.getTime(), FINFORM.carregando, FINFORM.em && FINFORM.em.getTime(),
       FORM.em && FORM.em.getTime(), linhas.length].join('|');
     var foco = document.activeElement;
     if (uiI.fin.__assin === assin && uiI.fin.firstChild) return;            // nada mudou: mant\u00e9m (e o calend\u00e1rio aberto)
