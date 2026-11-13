@@ -499,7 +499,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-11c';
+  var VERSAO = '2026-11-13a';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -3339,7 +3339,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   function moedaBR(n) { return 'R$ ' + Math.round(n).toLocaleString('pt-BR'); }
   var FORM = { porSol: {}, carregando: false, erro: '', em: null, base: '', incompleto: 0 };
-  var FORM_VERSAO = 7;                                         // muda quando a leitura do formul\u00e1rio ganha campos novos
+  var FORM_VERSAO = 8;                                         // muda quando a leitura do formul\u00e1rio ganha campos novos
   function lerFormCsv(txt, por) {
     var linhas = lerCsv(txt);
     if (!linhas.length) return 0;
@@ -3434,8 +3434,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       o.nProp = semDoc(pega(r, F.numeroProposta));
       o.props = [];
       h.forEach(function (nome, k) {
-        if (/^numeroProposta/i.test(nome) && !/geral/i.test(nome)) { var v = digits(r[k]); if (v && o.props.indexOf(v) === -1) o.props.push(v); }
+        if (/^n[u\u00fa]?mero(da|de)?proposta/i.test(nome) && !/geral/i.test(nome)) { var v = digits(r[k]); if (v && o.props.indexOf(v) === -1) o.props.push(v); }
       });
+      if (!o.nProp && o.props.length) o.nProp = o.props[0];       // advogado contratual/sucumbencial usam outro campo
       var kc = ix('comprovantePagamentoFundo'), ks = ix('situacaoDoComprovanteDePagamento');
       o.comprovante = (kc >= 0 && !!clean(r[kc])) || (ks >= 0 && /pag|anexad|receb|confirm/i.test(clean(r[ks])));
       // Valores como o FUNDO registra (conferido com o relat\u00f3rio di\u00e1rio de 10/11):
@@ -3443,10 +3444,17 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       //   Vl. Pago = proposta aceita (vSP\u2026 se for uma 2\u00aa proposta de verdade, sen\u00e3o vPP\u2026). O vSP \u00e0s vezes
       //   repete o valor corrigido (\u2248 face) e n\u00e3o \u00e9 proposta: nesse caso \u00e9 ignorado.
       var porPadrao = function (re) { for (var k = 0; k < h.length; k++) if (re.test(h[k]) && clean(r[k])) return valorNum(clean(r[k])); return 0; };
+      var vEx = function (nomes) { for (var k = 0; k < nomes.length; k++) { var ix2 = ix(nomes[k]); if (ix2 >= 0 && clean(r[ix2])) return valorNum(clean(r[ix2])); } return 0; };
+      o.partes = {
+        autor: { face: vEx(['vFA']) || vEx(['vTA']), pp: vEx(['vPPAutor']), sp: vEx(['vSPAutor']) },
+        contratual: { face: vEx(['vFHC']) || vEx(['vTHC']), pp: vEx(['vPPAdvogadoContratual']), sp: vEx(['vSPAdvogadoContratual']) },
+        sucumbencial: { face: vEx(['valorDeFaceDosHononariosSucumbenciais', 'vTHS']), pp: vEx(['vPPAdvogadoSucumbencia']), sp: vEx(['vSPAdvogadoSucumbencia']) }
+      };
       o.fVFA = porPadrao(/^vFA/i); o.fVTA = porPadrao(/^vTA$/i) || porPadrao(/^vTA/i);
       o.fVPP = porPadrao(/^vPP/i); o.fVSP = porPadrao(/^vSP/i);
       o.dtConcl = (function () { var d = lerData(clean(pega(r, ['Data de conclus\u00e3o']))); return d ? d.getTime() : 0; })();
       o.fundo = semDoc(pega(r, F.fundo));
+      if (!o.fundo) h.forEach(function (nome, k) { if (!o.fundo && /^fundoResponsavel/i.test(nome) && clean(r[k])) o.fundo = semDoc(clean(r[k])); });
       var corta = function (t) { t = semDoc(t); return t.length > 220 ? t.slice(0, 217) + '\u2026' : t; };
       o.motJur = corta(pega(r, F.motivoJuridico));
       o.motCli = corta(pega(r, F.motivoCliente));
@@ -3841,6 +3849,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   function valoresFundo(sol, inf) {
     var f = FORM.porSol[sol] || {};
+    // a parte negociada (autor, advogado contratual ou sucumbencial) \u00e9 a que tem proposta preenchida
+    var P2 = f.partes, parte = P2 && ['autor', 'contratual', 'sucumbencial'].map(function (k) { return P2[k]; })
+      .filter(function (x) { return x && (x.pp || x.sp) && x.face; })[0];
+    if (parte) {
+      var ok = function (v) { return v > 0 && v < parte.face - 1.5; };
+      return { face: parte.face, pago: ok(parte.sp) ? parte.sp : ok(parte.pp) ? parte.pp : (inf.propN || 0) };
+    }
     var face = f.fVFA || f.fVTA || inf.faceN || 0;
     var valido = function (v) { return v > 0 && (!face || v < face - 1.5); };   // proposta \u00e9 menor que a face
     var pago = valido(f.fVSP) ? f.fVSP : valido(f.fVPP) ? f.fVPP : (inf.propN || 0);
