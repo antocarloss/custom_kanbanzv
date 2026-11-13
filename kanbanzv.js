@@ -2331,11 +2331,16 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       nome: CFG.esteiras[id].nome,
       esteira: id,
       cols: function () {
-        var nomes = { ppp: 'PPP (cliente n\u00e3o responde)', negociacao: 'PPP Negocia\u00e7\u00e3o' };
+        var nomes = { ppp: 'PPP (cliente n\u00e3o responde)', negociacao: 'PPP Negocia\u00e7\u00e3o', proposta: 'Proposta enviada ao cliente' };
+        var dicas = { ppp: 'abertos neste m\u00eas', negociacao: 'ainda sem proposta ao cliente' };
+        var base = colunasEsteira(id).filter(function (c) { return ['ppp', 'negociacao', 'proposta', 'pendencias'].indexOf(c.id) !== -1; })
+          .map(function (c) { c.precisaB = false; if (nomes[c.id]) c.name = nomes[c.id]; if (dicas[c.id]) c.dica = dicas[c.id]; return c; });
+        var pend = base.filter(function (c) { return c.id === 'pendencias'; });   // Pend\u00eancias vai para depois de Proposta Aceita
         return [{ id: 'ppf', name: 'PPF (proposta futura)', dica: 'abertos neste m\u00eas' }]
-          .concat(colunasEsteira(id).filter(function (c) { return ['ppp', 'negociacao', 'proposta', 'pendencias'].indexOf(c.id) !== -1; })
-          .map(function (c) { c.precisaB = false; if (nomes[c.id]) c.name = nomes[c.id]; if (c.id === 'ppp') c.dica = 'abertos neste m\u00eas'; return c; }))
-          .concat([{ id: 'fecCom', name: 'Proposta Aceita', ok: true, dica: 'em formaliza\u00e7\u00e3o (fora as pend\u00eancias)' },
+          .concat(base.filter(function (c) { return c.id !== 'pendencias'; }))
+          .concat([{ id: 'fecCom', name: 'Proposta Aceita', ok: true, dica: 'em formaliza\u00e7\u00e3o (fora as pend\u00eancias)' }])
+          .concat(pend)
+          .concat([
                    { id: 'cessao', name: 'Proposta assinada pelo cliente', dica: 'T23 em andamento' },
                    { id: 'fechados', name: 'Fechados (PAGO)', ok: true, dica: 'na T24 ou depois, ou conclu\u00edda', encerrada: true },
                    { id: 'perdJur', name: 'Perdidas \u00b7 rejeitada pelo jur\u00eddico', alert: true, dica: 'passou pela reprova\u00e7\u00e3o (T11, T15 ou T16)', encerrada: true },
@@ -2431,6 +2436,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     L.cols = function () {
       var c = typeof cols0 === 'function' ? cols0() : cols0.slice(), col = { id: 'administrativo', name: 'Administrativo', dica: 'espelho: tarefas com Jo\u00e3o Sousa ou Iara Santos (continuam tamb\u00e9m na coluna da etapa)' };
       var i = -1; c.forEach(function (x, k) { if (x.id === 'fecCom') i = k; });
+      if (i >= 0 && c[i + 1] && c[i + 1].id === 'pendencias') i++;                // depois de Pend\u00eancias
       if (i === -1) c.forEach(function (x, k) { if (i === -1 && x.id === 'cessao') i = k - 1; });
       c.splice(i >= 0 ? i + 1 : c.length - 1, 0, col);
       return c;
