@@ -107,6 +107,9 @@
       aceite: 'T07',              // Filho: entrou na T07 = proposta aceita (data de recebimento da 1\u00aa T07)
       // Pagos pelo financeiro (relat\u00f3rio di\u00e1rio): s\u00f3 os N\u00daMEROS das propostas, nenhum valor ou dado pessoal.
       // Uma negocia\u00e7\u00e3o com uma dessas propostas vai para Fechados (PAGO), em qualquer etapa.
+      // Valor pago informado pelo financeiro (n\u00ba da SOLICITA\u00c7\u00c3O \u2192 valor). Vale acima de qualquer regra.
+      // Use para corrigir opera\u00e7\u00f5es em que o valor negociado n\u00e3o est\u00e1 no formul\u00e1rio.
+      valoresPagos: { '28160': 197907, '28290': 46271, '28941': 28923, '28751': 24500 },
       propostasPagas: ['1863', '1864', '1865', '1866', '1867', '1870', '1873', '1874', '1875',
                        '3717', '3752', '3787', '3791', '3795'],
       // PPP com o vendedor: campo "Tentativas de contato" (no resumo do Zeev). 0 = Novo; 1 a 4 = Tentativa de
@@ -410,7 +413,10 @@
         '\nComprovante anexado: ' + (f.comprovante ? 'sim' : 'n\u00e3o') + ' \u00b7 conclus\u00e3o: ' + dd(f.dtConcl) +
         '\nChegada na Finaliza\u00e7\u00e3o da Compra: ' + dd(FIN.compra && FIN.compra[sol]) + ' \u00b7 na Auditoria do Pagamento: ' + dd(FIN.pag && FIN.pag[sol]) +
         '\nAssinatura validada: ' + dd(FIN.val && (FIN.val[sol] || FIN.ass[sol])) +
-        '\nValores (fundo): pago ' + brl2(valoresFundo(sol, {}).pago) + ' \u00b7 face ' + brl2(valoresFundo(sol, {}).face) +
+        '\nValores (fundo): pago ' + brl2(valoresFundo(sol, {}).pago) + (valoresFundo(sol, {}).fixo ? (f.vPagoFundo ? ' (campo "Valor pago pelo fundo")' : ' (lista do financeiro)') + '; a regra daria ' + brl2(valoresFundo(sol, {}).calculado) : '') +
+        ' \u00b7 face ' + brl2(valoresFundo(sol, {}).face) +
+        (f.partes && f.partes.autor ? '\nAprovada: ' + (f.partes.autor.apDEx ? 'proposta do Diretor Executivo' : f.partes.autor.apSP ? '2\u00aa proposta' : f.partes.autor.apAutor ? '1\u00aa proposta' : 'nenhum parecer de aprova\u00e7\u00e3o') : '') +
+        (f.nums ? '\n\nValores no formul\u00e1rio:\n' + Object.keys(f.nums).map(function (k) { return k + ' = ' + brl2(f.nums[k]); }).join('\n') : '') +
         (f.partes && f.partes.autor && f.partes.autor.pp ? '\nAutor: 1\u00aa proposta ' + brl2(f.partes.autor.pp) + ' \u00b7 para hoje (Dir. Exec.) ' + brl2(f.partes.autor.neg[0]) +
           ' \u00b7 novo para hoje ' + brl2(f.partes.autor.neg[1]) + ' \u00b7 para hoje ' + brl2(f.partes.autor.neg[2]) + ' \u00b7 corrigida ' + brl2(f.partes.autor.neg[3]) : '');
     }).join('\n\n'));
@@ -501,7 +507,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-17d';
+  var VERSAO = '2026-11-17g';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -3426,7 +3432,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   function moedaBR(n) { return 'R$ ' + Math.round(n).toLocaleString('pt-BR'); }
   var FORM = { porSol: {}, carregando: false, erro: '', em: null, base: '', incompleto: 0 };
-  var FORM_VERSAO = 10;                                         // muda quando a leitura do formul\u00e1rio ganha campos novos
+  var FORM_VERSAO = 12;                                         // muda quando a leitura do formul\u00e1rio ganha campos novos
   function lerFormCsv(txt, por) {
     var linhas = lerCsv(txt);
     if (!linhas.length) return 0;
@@ -3537,13 +3543,26 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       // valor "para hoje" aprovado pelo Diretor Executivo > novo valor para hoje > valor para hoje do Diretor
       // Comercial > proposta corrigida > 1\u00aa proposta. A "2\u00aa proposta" (vSP) quase sempre repete a face: n\u00e3o \u00e9 usada.
       o.partes = {
-        autor: { face: vEx(['vFA']) || vEx(['vTA']), pp: vEx(['vPPAutor']),
-                 neg: [vEx(['valorPHojeDirEx']), vEx(['novoValorParaHoje']), vEx(['valorParaHojeAutor']), vEx(['vPAutorCorrigida'])] },
+        autor: { face: vEx(['vFA']) || vEx(['vTA']), pp: vEx(['vPPAutor']), sp: vEx(['vSPAutor']), corr: vEx(['vPAutorCorrigida']),
+                 neg: [vEx(['valorPHojeDirEx']), vEx(['novoValorParaHoje']), vEx(['valorParaHojeAutor']), vEx(['vPAutorCorrigida'])],
+                 // qual proposta foi APROVADA (parecer do formul\u00e1rio) decide o valor
+                 apAutor: /aprov/i.test(clean(pega(r, ['parecerPropostaAutor']))),
+                 apDEx: /aprov/i.test(clean(pega(r, ['parecerPropostaDEx']))),
+                 apSP: /aprov/i.test(clean(pega(r, ['parecerDaSegundaProposta']))) },
         contratual: { face: vEx(['vFHC']) || vEx(['vTHC']), pp: vEx(['vPPAdvogadoContratual']),
                       neg: [vRe(/^valorPHojeDirEx.*(adv|contrat)/i), vRe(/^valorParaHoje.*(adv|contrat)/i), vEx(['vPAdvogadoContratualCorrigida', 'vPAdvCCorrigida'])] },
         sucumbencial: { face: vEx(['valorDeFaceDosHononariosSucumbenciais', 'vTHS']), pp: vEx(['vPPAdvogadoSucumbencia']),
                         neg: [vRe(/^valorPHojeDirEx.*sucumb/i), vRe(/^valorParaHoje.*sucumb/i), vEx(['vPDFAdvogadoSucumbencia'])] }
       };
+      // "Valor pago pelo fundo" (campo preenchido pelo financeiro na T31-Auditar Pagamento): manda sobre tudo
+      h.forEach(function (nome, k) {
+        if (!o.vPagoFundo && /^valor\s*pago.*fundo|^valorPago(Pelo)?Fundo|^vPagoFundo|valorPagoPeloFundo/i.test(nome) && clean(r[k])) o.vPagoFundo = valorNum(clean(r[k]));
+      });
+      o.nums = {};                                               // valores do formul\u00e1rio (para o diagn\u00f3stico lcb:fin)
+      h.forEach(function (nome, k) {
+        var v = clean(r[k]);
+        if (v && /^(v[A-Z]|valor|novoValor)/.test(nome) && !/comiss/i.test(nome) && /^[\d.,]+$/.test(v) && Object.keys(o.nums).length < 30) o.nums[nome] = valorNum(v);
+      });
       o.fVFA = porPadrao(/^vFA/i); o.fVTA = porPadrao(/^vTA$/i) || porPadrao(/^vTA/i);
       o.fVPP = porPadrao(/^vPP/i); o.fVSP = porPadrao(/^vSP/i);
       o.dtConcl = (function () { var d = lerData(clean(pega(r, ['Data de conclus\u00e3o']))); return d ? d.getTime() : 0; })();
@@ -3950,12 +3969,27 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   function valoresFundo(sol, inf) {
     var f = FORM.porSol[sol] || {};
+    var inf0 = inf || {}, fixo = f.vPagoFundo || (CFG.producao.valoresPagos || {})[sol];
+    if (fixo) {                                                  // campo "Valor pago pelo fundo" (T31) ou lista do financeiro
+      var r0 = valoresFundoRegra(sol, inf0, f);
+      return { face: r0.face, pago: fixo, fixo: true, calculado: r0.pago };
+    }
+    return valoresFundoRegra(sol, inf0, f);
+  }
+  function valoresFundoRegra(sol, inf, f) {
     // a parte negociada (autor, advogado contratual ou sucumbencial) \u00e9 a que tem proposta preenchida
     var P2 = f.partes, parte = P2 && ['autor', 'contratual', 'sucumbencial'].map(function (k) { return P2[k]; })
       .filter(function (x) { return x && x.pp && x.face; })[0];
     if (parte) {
       var ok = function (v) { return v > 0 && v < parte.face * 0.95; };       // proposta tem des\u00e1gio: \u2265 95% da face \u00e9 valor corrigido
-      var pago = (parte.neg || []).filter(ok)[0] || (ok(parte.pp) ? parte.pp : 0) || inf.propN || 0;
+      var pago = 0;
+      if (parte === P2.autor && (parte.apAutor || parte.apDEx || parte.apSP)) {
+        // conferido com 47 opera\u00e7\u00f5es do relat\u00f3rio do financeiro: 41 exatas (87%)
+        if (parte.apDEx) pago = parte.neg.slice(0, 3).filter(ok)[0] || parte.pp;               // negociado com o Diretor Executivo
+        else if (parte.apSP) pago = ok(parte.sp) ? parte.sp : parte.pp;                       // 2\u00aa proposta aprovada
+        else pago = ok(parte.corr) && parte.pp && Math.abs(parte.corr - parte.pp) / parte.pp < 0.05 ? parte.corr : parte.pp;   // 1\u00aa proposta aprovada
+      }
+      if (!pago) pago = (parte.neg || []).filter(ok)[0] || (ok(parte.pp) ? parte.pp : 0) || inf.propN || 0;
       return { face: parte.face, pago: pago };
     }
     var face = f.fVFA || f.fVTA || inf.faceN || 0;
@@ -4031,6 +4065,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     notas.push('Crit\u00e9rio: ' + conta('campo') + ' pela data do pagamento no formul\u00e1rio \u00b7 ' + conta('compra') + ' pela chegada na Finaliza\u00e7\u00e3o da Compra (T30) \u00b7 ' +
       conta('pagamento') + ' pela chegada na Auditoria (T31) \u00b7 ' +
       conta('conclusao') + ' conclu\u00eddas com comprovante');
+    var nCampoV = linhas.filter(function (l) { return (FORM.porSol[l.sol] || {}).vPagoFundo; }).length;
+    notas.push('Valor pago: ' + nCampoV + ' de ' + linhas.length + ' pelo campo "Valor pago pelo fundo" (T31); os demais estimados pelo formul\u00e1rio');
     if (FIN.semEtapa) notas.push(FIN.semEtapa + ' com data de pagamento no formul\u00e1rio, mas que ainda n\u00e3o chegaram na Finaliza\u00e7\u00e3o da Compra (T30) (n\u00e3o inclu\u00eddas)');
     if (FIN.soAssinatura) notas.push(FIN.soAssinatura + ' negocia\u00e7\u00e3o(\u00f5es) com assinatura validada no per\u00edodo, sem confirma\u00e7\u00e3o de pagamento no Zeev (n\u00e3o inclu\u00eddas)');
     notas.push('Tarefas de pagamento no log: ' + (nP.length ? nP.join(' \u00b7 ') : 'nenhuma'));
