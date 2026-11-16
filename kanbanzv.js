@@ -408,7 +408,7 @@
       return 'Solicita\u00e7\u00e3o #' + sol + ' \u00b7 proposta ' + (f.nProp || '\u2014') +
         '\nData do pagamento (campo): ' + dd(f.dtPag) +
         '\nComprovante anexado: ' + (f.comprovante ? 'sim' : 'n\u00e3o') + ' \u00b7 conclus\u00e3o: ' + dd(f.dtConcl) +
-        '\nChegada na T27: ' + dd(FIN.compra && FIN.compra[sol]) + ' \u00b7 chegada na T28: ' + dd(FIN.pag && FIN.pag[sol]) +
+        '\nChegada na Finaliza\u00e7\u00e3o da Compra: ' + dd(FIN.compra && FIN.compra[sol]) + ' \u00b7 na Auditoria do Pagamento: ' + dd(FIN.pag && FIN.pag[sol]) +
         '\nAssinatura validada: ' + dd(FIN.val && (FIN.val[sol] || FIN.ass[sol])) +
         '\nValores (fundo): pago ' + brl2(valoresFundo(sol, {}).pago) + ' \u00b7 face ' + brl2(valoresFundo(sol, {}).face);
     }).join('\n\n'));
@@ -499,7 +499,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-17a';
+  var VERSAO = '2026-11-17c';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -2153,7 +2153,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   //  cancelada/recusada/reprovada/rejeitada.
   var RE_PERDA = /cancel|recus|reprov|rejeit|perd|desist|desqualif/i;
   // Fechado formalmente: a negocia\u00e7\u00e3o est\u00e1 NA T24 (ou j\u00e1 passou dela)
-  // PAGO = chegou na T27-Acompanhar Finaliza\u00e7\u00e3o da Compra, na T28-Auditar Pagamento ou depois (regra \u00fanica, todos os pipelines)
+  // PAGO = chegou em "Acompanhar Finaliza\u00e7\u00e3o da Compra" (T30; era T27), "Auditar Pagamento" (T31; era T28) ou depois.
+  // Reconhecido pelo NOME da tarefa: vale para qualquer numera\u00e7\u00e3o do fluxo (regra \u00fanica, todos os pipelines)
   function noFormal(it) { return it.tipo === 'filho' && it.ativo && it.stage === 'pos'; }
   // etapas que s\u00f3 existem depois que o cliente aceitou a proposta (documenta\u00e7\u00e3o em diante)
   var ETAPAS_ACEITE = ['documentacao', 'analise', 'pendjur', 'reprovacao', 'contrato', 'video', 'assinatura', 'pendencias', 'cessao'];
@@ -2220,7 +2221,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     ['negociacao', 'Em negocia\u00e7\u00e3o', 'em contato com o cliente para negociar'],
     ['pendencias', 'Pend\u00eancias', 'aguardando corre\u00e7\u00e3o de pend\u00eancias (mesma coluna da esteira comercial)'],
     ['aceita', 'Proposta aceita', 'aceitou e enviou os documentos'],
-    ['pago', 'Fechado (PAGO)', 'chegou na T27 (finaliza\u00e7\u00e3o da compra), T28 ou depois, ou conclu\u00edda'],
+    ['pago', 'Fechado (PAGO)', 'chegou na Finaliza\u00e7\u00e3o da Compra (T30), na Auditoria (T31) ou depois, ou conclu\u00edda'],
     ['recusada', 'Proposta recusada', 'sem interesse pelo pre\u00e7o'],
     ['recusou', 'Recusou negociar', 'sem interesse em receber proposta'],
     ['fora', 'Fora do par\u00e2metro', 'processo fora dos par\u00e2metros de aquisi\u00e7\u00e3o']
@@ -2406,7 +2407,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
           .concat(pend)
           .concat([
                    { id: 'cessao', name: 'Proposta assinada pelo cliente', dica: 'T23 em andamento' },
-                   { id: 'fechados', name: 'Fechados (PAGO)', ok: true, dica: 'chegou na T27, T28 ou depois, ou conclu\u00edda', encerrada: true },
+                   { id: 'fechados', name: 'Fechados (PAGO)', ok: true, dica: 'chegou na T30 (finaliza\u00e7\u00e3o da compra), T31 ou depois, ou conclu\u00edda', encerrada: true },
                    { id: 'perdJur', name: 'Perdidas \u00b7 rejeitada pelo jur\u00eddico', alert: true, dica: 'passou pela reprova\u00e7\u00e3o (T11, T15 ou T16)', encerrada: true },
                    { id: 'perdCli', name: 'Perdidas \u00b7 rejeitada pelo cliente', alert: true, dica: 'cancelada ou recusada pelo cliente', encerrada: true },
                    { id: 'perdNI', name: 'Perdidas \u00b7 motivo n\u00e3o identificado', alert: true, opcional: true, encerrada: true,
@@ -2443,7 +2444,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       cols: function () {
         return colunasEsteira(id).map(function (c) {
           c.precisaB = false;
-          if (c.id === 'pos') { c.name = 'Pagos'; c.ok = true; c.encerrada = true; c.dica = 'chegou na T27, T28 ou depois, ou conclu\u00edda'; }
+          if (c.id === 'pos') { c.name = 'Pagos'; c.ok = true; c.encerrada = true; c.dica = 'chegou na T30 (finaliza\u00e7\u00e3o da compra), T31 ou depois, ou conclu\u00edda'; }
           return c;
         })
           .concat([{ id: 'rejJur', name: 'Rejeitadas pelo Jur\u00eddico', alert: true, encerrada: true,
@@ -2527,24 +2528,25 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       espelho: function (it) { return comAdministrativo(it) && statusComercial(it) ? 'st_admin' : ''; }
     },
     financeiro: {
-      nome: 'Financeiro \u00b7 fechados e pagos no dia',
+      nome: 'Controladoria \u00b7 fechados e pagos no dia',
       esteira: 'juridico',
       cols: function () {
         return [
-          { id: 'fin_auditar', name: 'Auditar pagamento (T28)', dica: 'compra finalizada, aguardando a auditoria do financeiro' },
-          { id: 'fin_problema', name: 'Problema no pagamento', dica: 'voltou da T28 com problema', alert: true },
-          { id: 'fin_ok', name: 'Pagamento confirmado', dica: 'passou da T28 (confirmado), compra finalizada no per\u00edodo', ok: true, encerrada: true },
+          { id: 'fin_auditar', name: 'Auditar pagamento (T31)', dica: 'compra finalizada, aguardando a auditoria do financeiro' },
+          { id: 'fin_problema', name: 'Problema no pagamento', dica: 'voltou da auditoria (T31) com problema', alert: true },
+          { id: 'fin_ok', name: 'Pagamento confirmado', dica: 'passou da auditoria (T31, confirmado), compra finalizada no per\u00edodo', ok: true, encerrada: true },
           { id: 'outros', name: 'Outras \u00e1reas', opcional: true, outras: true }
         ];
       },
       place: function (it) {
         if (it.tipo !== 'filho') return 'outros';
-        var cod = codigoDe(it.atividade), n = parseFloat(String(cod).replace(/^T/i, '')) || 0;
-        if (it.ativo && (/auditar pagamento/.test(nomeTarefa(it.atividade)) || /^T28$/i.test(cod))) return 'fin_auditar';
+        var nmF = nomeTarefa(it.atividade);
+        if (it.ativo && /auditar pagamento/.test(nmF)) return 'fin_auditar';
         var t = FIN.t28 && FIN.t28[it.num];
         if (!t) return 'outros';
-        if (it.ativo && n && n < 28) return 'fin_problema';                       // voltou para antes da T28
-        if (!t.aberta && (!it.ativo ? !perdida(it) : n > 28)) {
+        var antes = it.ativo && it.stage !== 'pos' || (it.ativo && /finalizacao da compra/.test(nmF));   // voltou para antes da auditoria
+        if (antes) return 'fin_problema';
+        if (!t.aberta && (!it.ativo ? !perdida(it) : it.stage === 'pos')) {
           var P = finPeriodo(), d = t.chegada;
           return d && d >= P.de && d < new Date(P.ate.getTime() + DIA) ? 'fin_ok' : 'outros';
         }
@@ -3305,7 +3307,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       ['triagem', 'Pipeline da Triagem'], ['inatividade', 'Pipeline Inatividade'], ['relnovos', 'Pipeline Relacionamento'],
       ['rejeitados', 'Pipeline Rejeitados'], ['status', 'Pipeline Status'], ['relrd', 'Pipeline Relacionamento RD']] },
     { id: 'juridico', nome: 'Diretoria Jur\u00eddico', itens: [['juridico', 'Pipeline Jur\u00eddico']] },
-    { id: 'financeiro', nome: 'Financeiro', itens: [['financeiro', 'Pipeline Financeiro']], so: function () { return financeiroLiberado(); } }
+    { id: 'financeiro', nome: 'Controladoria', itens: [['financeiro', 'Pipeline Controladoria']], so: function () { return financeiroLiberado(); } }
   ];
   function areasVisiveis() { return AREAS_PIPE.filter(function (a) { return !a.so || a.so(); }); }
   function areaDoLayout(lay) {
@@ -4016,10 +4018,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var nP = Object.keys(FIN.nomesPago || {}), nA = Object.keys(FIN.nomesAss || {}), nC = Object.keys(FIN.nomesCompra || {});
     notas.push('Tarefa de compra no log: ' + (nC.length ? nC.join(' \u00b7 ') : 'nenhuma'));
     var conta = function (v) { return linhas.filter(function (l) { return l.via === v; }).length; };
-    notas.push('Crit\u00e9rio: ' + conta('campo') + ' pela data do pagamento no formul\u00e1rio \u00b7 ' + conta('compra') + ' pela chegada na T27 (finaliza\u00e7\u00e3o da compra) \u00b7 ' +
-      conta('pagamento') + ' pela chegada na T28 \u00b7 ' +
+    notas.push('Crit\u00e9rio: ' + conta('campo') + ' pela data do pagamento no formul\u00e1rio \u00b7 ' + conta('compra') + ' pela chegada na Finaliza\u00e7\u00e3o da Compra (T30) \u00b7 ' +
+      conta('pagamento') + ' pela chegada na Auditoria (T31) \u00b7 ' +
       conta('conclusao') + ' conclu\u00eddas com comprovante');
-    if (FIN.semEtapa) notas.push(FIN.semEtapa + ' com data de pagamento no formul\u00e1rio, mas que ainda n\u00e3o chegaram na T27/T28 (n\u00e3o inclu\u00eddas)');
+    if (FIN.semEtapa) notas.push(FIN.semEtapa + ' com data de pagamento no formul\u00e1rio, mas que ainda n\u00e3o chegaram na Finaliza\u00e7\u00e3o da Compra (T30) (n\u00e3o inclu\u00eddas)');
     if (FIN.soAssinatura) notas.push(FIN.soAssinatura + ' negocia\u00e7\u00e3o(\u00f5es) com assinatura validada no per\u00edodo, sem confirma\u00e7\u00e3o de pagamento no Zeev (n\u00e3o inclu\u00eddas)');
     notas.push('Tarefas de pagamento no log: ' + (nP.length ? nP.join(' \u00b7 ') : 'nenhuma'));
     var dg = FIN.diagPag;
@@ -4116,9 +4118,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (!FIN.carregando && LC.base && (FIN.chave !== chave || !FIN.em || Date.now() - FIN.em.getTime() > 10 * 60000) && !(FIN.erro && FIN.chave === chave)) setTimeout(carregarFinanceiro, 0);
     var box = el('div', 'lcbk-fin');
     var topo = el('div', 'lcbk-fin-top');
-    topo.appendChild(el('h2', null, finModo() === 'relatorio' ? 'Relat\u00f3rio Di\u00e1rio \u00b7 FIDC LCB I & II' : finModo() === 'kanban' ? 'Financeiro \u00b7 auditoria de pagamento' : 'Financeiro \u00b7 fechados e pagos'));
+    topo.appendChild(el('h2', null, finModo() === 'relatorio' ? 'Relat\u00f3rio Di\u00e1rio \u00b7 FIDC LCB I & II' : finModo() === 'kanban' ? 'Controladoria \u00b7 auditoria de pagamento' : 'Controladoria \u00b7 fechados e pagos'));
     var modos = el('div', 'lcbk-seg-wrap');
-    [['kanban', 'Kanban (T28)'], ['planilha', 'Planilha de importa\u00e7\u00e3o'], ['relatorio', 'Relat\u00f3rio di\u00e1rio']].forEach(function (m) {
+    [['kanban', 'Kanban (auditoria)'], ['planilha', 'Planilha de importa\u00e7\u00e3o'], ['relatorio', 'Relat\u00f3rio di\u00e1rio']].forEach(function (m) {
       var b = el('button', 'lcbk-seg' + (finModo() === m[0] ? ' is-on' : ''), m[1]); b.type = 'button';
       b.addEventListener('click', function () { ls('lcbKanbanFinModo', m[0]); renderInst(); });
       modos.appendChild(b);
@@ -4161,7 +4163,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var linhas = FIN.pagos ? linhasFinanceiro() : [];
     if (finModo() === 'kanban') {
       if (FIN.carregando) box.appendChild(el('p', 'lcbk-fin-msg', FIN.prog || 'Lendo o log de tarefas\u2026'));
-      else box.appendChild(el('p', 'lcbk-fin-nota', '"Pagamento confirmado" mostra as compras finalizadas (chegada na T28) no per\u00edodo escolhido. Clique no card para abrir a negocia\u00e7\u00e3o.'));
+      else box.appendChild(el('p', 'lcbk-fin-nota', '"Pagamento confirmado" mostra as compras finalizadas (chegada na auditoria, T31) no per\u00edodo escolhido. Clique no card para abrir a negocia\u00e7\u00e3o.'));
       var assinK = ['kanban', stInst.finDe, stInst.finAte, FIN.carregando, FIN.prog, FIN.em && FIN.em.getTime()].join('|');
       if (uiI.fin.__assin === assinK && uiI.fin.firstChild) return;
       uiI.fin.__assin = assinK; uiI.fin.replaceChildren(box);
