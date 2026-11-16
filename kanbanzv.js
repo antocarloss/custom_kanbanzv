@@ -410,7 +410,9 @@
         '\nComprovante anexado: ' + (f.comprovante ? 'sim' : 'n\u00e3o') + ' \u00b7 conclus\u00e3o: ' + dd(f.dtConcl) +
         '\nChegada na Finaliza\u00e7\u00e3o da Compra: ' + dd(FIN.compra && FIN.compra[sol]) + ' \u00b7 na Auditoria do Pagamento: ' + dd(FIN.pag && FIN.pag[sol]) +
         '\nAssinatura validada: ' + dd(FIN.val && (FIN.val[sol] || FIN.ass[sol])) +
-        '\nValores (fundo): pago ' + brl2(valoresFundo(sol, {}).pago) + ' \u00b7 face ' + brl2(valoresFundo(sol, {}).face);
+        '\nValores (fundo): pago ' + brl2(valoresFundo(sol, {}).pago) + ' \u00b7 face ' + brl2(valoresFundo(sol, {}).face) +
+        (f.partes && f.partes.autor && f.partes.autor.pp ? '\nAutor: 1\u00aa proposta ' + brl2(f.partes.autor.pp) + ' \u00b7 para hoje (Dir. Exec.) ' + brl2(f.partes.autor.neg[0]) +
+          ' \u00b7 novo para hoje ' + brl2(f.partes.autor.neg[1]) + ' \u00b7 para hoje ' + brl2(f.partes.autor.neg[2]) + ' \u00b7 corrigida ' + brl2(f.partes.autor.neg[3]) : '');
     }).join('\n\n'));
     return true;
   }
@@ -499,7 +501,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-17c';
+  var VERSAO = '2026-11-17d';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -3424,7 +3426,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   function moedaBR(n) { return 'R$ ' + Math.round(n).toLocaleString('pt-BR'); }
   var FORM = { porSol: {}, carregando: false, erro: '', em: null, base: '', incompleto: 0 };
-  var FORM_VERSAO = 9;                                         // muda quando a leitura do formul\u00e1rio ganha campos novos
+  var FORM_VERSAO = 10;                                         // muda quando a leitura do formul\u00e1rio ganha campos novos
   function lerFormCsv(txt, por) {
     var linhas = lerCsv(txt);
     if (!linhas.length) return 0;
@@ -3530,10 +3532,17 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       //   repete o valor corrigido (\u2248 face) e n\u00e3o \u00e9 proposta: nesse caso \u00e9 ignorado.
       var porPadrao = function (re) { for (var k = 0; k < h.length; k++) if (re.test(h[k]) && clean(r[k])) return valorNum(clean(r[k])); return 0; };
       var vEx = function (nomes) { for (var k = 0; k < nomes.length; k++) { var ix2 = ix(nomes[k]); if (ix2 >= 0 && clean(r[ix2])) return valorNum(clean(r[ix2])); } return 0; };
+      var vRe = function (re) { for (var k = 0; k < h.length; k++) if (re.test(h[k]) && clean(r[k])) return valorNum(clean(r[k])); return 0; };
+      // Valor que o fundo paga (conferido com 47 opera\u00e7\u00f5es do relat\u00f3rio do financeiro, 83% exatas):
+      // valor "para hoje" aprovado pelo Diretor Executivo > novo valor para hoje > valor para hoje do Diretor
+      // Comercial > proposta corrigida > 1\u00aa proposta. A "2\u00aa proposta" (vSP) quase sempre repete a face: n\u00e3o \u00e9 usada.
       o.partes = {
-        autor: { face: vEx(['vFA']) || vEx(['vTA']), pp: vEx(['vPPAutor']), sp: vEx(['vSPAutor']) },
-        contratual: { face: vEx(['vFHC']) || vEx(['vTHC']), pp: vEx(['vPPAdvogadoContratual']), sp: vEx(['vSPAdvogadoContratual']) },
-        sucumbencial: { face: vEx(['valorDeFaceDosHononariosSucumbenciais', 'vTHS']), pp: vEx(['vPPAdvogadoSucumbencia']), sp: vEx(['vSPAdvogadoSucumbencia']) }
+        autor: { face: vEx(['vFA']) || vEx(['vTA']), pp: vEx(['vPPAutor']),
+                 neg: [vEx(['valorPHojeDirEx']), vEx(['novoValorParaHoje']), vEx(['valorParaHojeAutor']), vEx(['vPAutorCorrigida'])] },
+        contratual: { face: vEx(['vFHC']) || vEx(['vTHC']), pp: vEx(['vPPAdvogadoContratual']),
+                      neg: [vRe(/^valorPHojeDirEx.*(adv|contrat)/i), vRe(/^valorParaHoje.*(adv|contrat)/i), vEx(['vPAdvogadoContratualCorrigida', 'vPAdvCCorrigida'])] },
+        sucumbencial: { face: vEx(['valorDeFaceDosHononariosSucumbenciais', 'vTHS']), pp: vEx(['vPPAdvogadoSucumbencia']),
+                        neg: [vRe(/^valorPHojeDirEx.*sucumb/i), vRe(/^valorParaHoje.*sucumb/i), vEx(['vPDFAdvogadoSucumbencia'])] }
       };
       o.fVFA = porPadrao(/^vFA/i); o.fVTA = porPadrao(/^vTA$/i) || porPadrao(/^vTA/i);
       o.fVPP = porPadrao(/^vPP/i); o.fVSP = porPadrao(/^vSP/i);
@@ -3943,10 +3952,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var f = FORM.porSol[sol] || {};
     // a parte negociada (autor, advogado contratual ou sucumbencial) \u00e9 a que tem proposta preenchida
     var P2 = f.partes, parte = P2 && ['autor', 'contratual', 'sucumbencial'].map(function (k) { return P2[k]; })
-      .filter(function (x) { return x && (x.pp || x.sp) && x.face; })[0];
+      .filter(function (x) { return x && x.pp && x.face; })[0];
     if (parte) {
-      var ok = function (v) { return v > 0 && v < parte.face - 1.5; };
-      return { face: parte.face, pago: ok(parte.sp) ? parte.sp : ok(parte.pp) ? parte.pp : (inf.propN || 0) };
+      var ok = function (v) { return v > 0 && v < parte.face * 0.95; };       // proposta tem des\u00e1gio: \u2265 95% da face \u00e9 valor corrigido
+      var pago = (parte.neg || []).filter(ok)[0] || (ok(parte.pp) ? parte.pp : 0) || inf.propN || 0;
+      return { face: parte.face, pago: pago };
     }
     var face = f.fVFA || f.fVTA || inf.faceN || 0;
     var valido = function (v) { return v > 0 && (!face || v < face - 1.5); };   // proposta \u00e9 menor que a face
