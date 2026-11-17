@@ -525,7 +525,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-18a';
+  var VERSAO = '2026-11-18b';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -2838,7 +2838,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   // Inatividade e Relacionamento Novos olham todos os meses: ignoram o filtro de per\u00edodo
   function periodoEfetivo() {
     var lay = layoutInstAtivo();
-    return lay === 'inatividade' || lay === 'relnovos' || lay === 'financeiro' ? '' : (stInst.periodo || '');   // financeiro: o per\u00edodo \u00e9 o da pr\u00f3pria vis\u00e3o
+    return lay === 'inatividade' || lay === 'relnovos' || lay === 'financeiro' || /^fundo/.test(lay) ? '' : (stInst.periodo || '');   // fundos: todos os per\u00edodos   // financeiro: o per\u00edodo \u00e9 o da pr\u00f3pria vis\u00e3o
   }
   function nomePeriodo(k) { for (var i = 0; i < PERIODOS.length; i++) if (PERIODOS[i][0] === k) return PERIODOS[i][1]; return ''; }
   function intervaloPeriodo(k) {
