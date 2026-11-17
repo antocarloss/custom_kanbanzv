@@ -192,6 +192,10 @@
     // Vis\u00e3o Financeiro: liberada por computador com "lcb:financeiro <c\u00f3digo>" na busca do Kanban.
     // Aqui fica s\u00f3 o SHA-256 do c\u00f3digo (o c\u00f3digo n\u00e3o aparece no reposit\u00f3rio). Para trocar, gere um novo hash.
     financeiroHash: '0216717b14dd4ec539e2f955bad78a979d8b694bfce40b4a388871da4aadfe35',
+    // Vis\u00f5es dos fundos (pessoas externas): liberadas por computador com "lcb:fundo1 <c\u00f3digo>" / "lcb:fundo2 <c\u00f3digo>".
+    // Num computador liberado para um fundo, o Kanban mostra S\u00d3 a vis\u00e3o desse fundo.
+    fundosHash: { fundo1: 'f6b4a9bb2c8167b4d6b2290aa521e8d5000c8c152bd438405ca89cf2cd38fe6a',
+                  fundo2: '9172fc51d1457a4ad9afdb948054cf2e5f5043ac9277219424d5679f3b828bd1' },
     keys: { flag: 'lcbKanban', gestor: 'lcbGestor', financeiro: 'lcbFinanceiro', view: 'lcbKanbanView', layout: 'lcbKanbanLayout',
             viewInst: 'lcbKanbanViewInst', layoutInst: 'lcbKanbanLayoutInst' },
 
@@ -326,7 +330,7 @@
       assinatura: 'Assinatura (comercial)', video: 'V\u00eddeo de aceite', documentacao: 'Documenta\u00e7\u00e3o',
       analise: 'An\u00e1lise jur\u00eddica', reprovacao: 'Reprova\u00e7\u00e3o', pendjur: 'Pend\u00eancias (jur\u00eddico)', contrato: 'Contrato & Assinatura',
       cessao: 'Cess\u00e3o & Protocolo', pos: 'P\u00f3s-cess\u00e3o', triagem: 'Triagem', acompanhar: 'Acompanhar lead',
-      ppf: 'PPF (proposta futura)', ppp: 'PPP (negociar compra)', outros: 'Outra etapa'
+      ppf: 'PPF (proposta futura)', ppp: 'PPP (negociar compra)', gestora: 'Aprova\u00e7\u00e3o da gestora', outros: 'Outra etapa'
     },
     // Filas de grupo: o Zeev s\u00f3 informa o 1\u00ba nome e "+N". Para as filas conhecidas,
     // o Kanban mostra o nome da fila e quem faz parte dela. [fluxo, c\u00f3digo da atividade, nome, membros]
@@ -355,7 +359,7 @@
           ['reprovacao', 'Pend\u00eancias', ['juridico', 'conselho'], ['pendjur', 'reprovacao']],
           ['contrato', 'Contrato & Assinatura', ['juridico'], ['contrato']],
           ['video', 'V\u00eddeo de aceite', ['juridico'], ['video']],
-          ['cessao', 'Cess\u00e3o & Protocolo', ['juridico'], ['cessao']],
+          ['cessao', 'Cess\u00e3o & Protocolo', ['juridico'], ['cessao', 'gestora']],
           ['pos', 'P\u00f3s-cess\u00e3o', ['juridico'], ['pos']]
         ]
       },
@@ -424,6 +428,20 @@
   }
   function comandoAtivacao(txt) {
     if (diagnosticoFin(txt)) return true;
+    var fdm = String(txt || '').trim().match(/^lcb:fundo([12])(?:\s+(\S+))?$/i);
+    if (fdm) {
+      var chaveF = 'lcbFundo' + fdm[1];
+      if (fdm[2] && fdm[2].toLowerCase() === 'off') { ls(chaveF, 'off'); alert('Vis\u00e3o do Fundo ' + (fdm[1] === '1' ? 'I' : 'II') + ' desativada neste computador. A p\u00e1gina vai recarregar.'); location.reload(); return true; }
+      if (!fdm[2] || !(window.crypto && crypto.subtle)) { alert('Para liberar, digite: lcb:fundo' + fdm[1] + ' <c\u00f3digo de acesso>'); return true; }
+      crypto.subtle.digest('SHA-256', new TextEncoder().encode(fdm[2].toUpperCase())).then(function (buf) {
+        var hex = [].map.call(new Uint8Array(buf), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+        if (hex === CFG.fundosHash['fundo' + fdm[1]]) {
+          ls(chaveF, 'on'); ls(CFG.keys.layoutInst, 'fundo' + fdm[1]);
+          alert('Vis\u00e3o do Fundo ' + (fdm[1] === '1' ? 'I' : 'II') + ' liberada neste computador. A p\u00e1gina vai recarregar.'); location.reload();
+        } else alert('C\u00f3digo de acesso inv\u00e1lido.');
+      });
+      return true;
+    }
     var fm = String(txt || '').trim().match(/^lcb:financeiro(?:\s+(\S+))?$/i);
     if (fm) {
       if (fm[1] && fm[1].toLowerCase() === 'off') {
@@ -507,7 +525,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-17g';
+  var VERSAO = '2026-11-18a';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -599,6 +617,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   // T16 = an\u00e1lise das pend\u00eancias, T22 = validar assinatura, T27 = finaliza\u00e7\u00e3o da compra\u2026). Por isso a
   // etapa \u00e9 reconhecida pelo NOME da tarefa; o c\u00f3digo s\u00f3 \u00e9 usado se o nome n\u00e3o for reconhecido.
   var ETAPA_POR_NOME = [
+    [/gestora/, 'juridico', 'gestora'],                    // T27-Solicitar Aprova\u00e7\u00e3o da Gestora, T28/T29-Aprova\u00e7\u00e3o da Gestora do Fundo
     [/auditar pagamento|finalizacao da compra|liquidacao|astrea|acompanhamento do ativo|acompanhar o ativo/, 'juridico', 'pos'],
     [/aprovacao para o fundo|aprovacao do fundo|protocol|cessao de credito/, 'juridico', 'cessao'],
     [/validar.*video|video.*validar/, 'juridico', 'video'],
@@ -2165,7 +2184,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   // Reconhecido pelo NOME da tarefa: vale para qualquer numera\u00e7\u00e3o do fluxo (regra \u00fanica, todos os pipelines)
   function noFormal(it) { return it.tipo === 'filho' && it.ativo && it.stage === 'pos'; }
   // etapas que s\u00f3 existem depois que o cliente aceitou a proposta (documenta\u00e7\u00e3o em diante)
-  var ETAPAS_ACEITE = ['documentacao', 'analise', 'pendjur', 'reprovacao', 'contrato', 'video', 'assinatura', 'pendencias', 'cessao'];
+  var ETAPAS_ACEITE = ['documentacao', 'analise', 'pendjur', 'reprovacao', 'contrato', 'video', 'assinatura', 'pendencias', 'cessao', 'gestora'];
   function posAceite(it) {
     if (ETAPAS_ACEITE.indexOf(it.stage) !== -1) return true;
     return it.stage === 'outros' && CFG.producao.posAceite.indexOf(codigoDe(it.atividade)) !== -1;
@@ -2439,7 +2458,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
           return mot === 'juridico' ? 'perdJur' : mot === 'cliente' ? 'perdCli' : 'perdNI';
         }
         if (it.stage === 'pos' || noFormal(it)) return 'fechados';   // na T24 ou depois = fechado formalmente
-        if (it.stage === 'cessao') return 'cessao';
+        if (it.stage === 'cessao' || it.stage === 'gestora') return 'cessao';
         var c2 = colunaDe(id, it);
         if (c2 === 'pendencias') return 'pendencias';
         if (posAceite(it)) return 'fecCom';
@@ -2499,6 +2518,39 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         // encerradas do Pai n\u00e3o interessam \u00e0s esteiras comercial e jur\u00eddica
         if (!it.ativo) return id === 'triagem' || it.tipo === 'filho' ? 'encerradas' : 'outros';
         return colunaDe(id, it);
+      }
+    };
+  }
+  // \u2500\u2500 Vis\u00f5es dos fundos: s\u00f3 as negocia\u00e7\u00f5es do fundo, em 3 colunas
+  function fundoDe(it) {
+    var nm = nomeTarefa(it.atividade);                         // T28/T29: "Aprova\u00e7\u00e3o da Gestora do Fundo I/II" manda
+    if (/fundo\s*(ii|2)\b/.test(nm)) return 'II';
+    if (/fundo\s*(i|1)\b/.test(nm)) return 'I';
+    var f = FORM.porSol[it.num] || {}, v = lower(f.fundo || '');    // sen\u00e3o, o "Fundo Respons\u00e1vel" do formul\u00e1rio
+    if (/\b(2|ii)\b/.test(v)) return 'II';
+    if (/\b(1|i)\b/.test(v)) return 'I';
+    return '';
+  }
+  function layoutFundo(F) {
+    return {
+      nome: 'Fundo ' + F,
+      esteira: 'fundo',
+      fundo: F,
+      cols: function () {
+        return [
+          { id: 'f_contrato', name: 'Contrato & Assinatura', dica: 'contrato, assinatura e v\u00eddeo de aceite' },
+          { id: 'f_gestora', name: 'Aguardando Aprova\u00e7\u00e3o da Gestora', dica: 'solicitada a aprova\u00e7\u00e3o da gestora do Fundo ' + F },
+          { id: 'f_pago', name: 'Cess\u00e3o & Protocolo', ok: true, encerrada: true, dica: 'opera\u00e7\u00f5es pagas (finaliza\u00e7\u00e3o da compra em diante)' },
+          { id: 'outros', name: 'Outras', opcional: true, outras: true }
+        ];
+      },
+      place: function (it) {
+        if (it.tipo !== 'filho' || fundoDe(it) !== F) return 'outros';
+        if (!it.ativo) return perdida(it) ? 'outros' : 'f_pago';
+        if (it.stage === 'pos') return 'f_pago';
+        if (it.stage === 'gestora') return 'f_gestora';
+        if (['contrato', 'assinatura', 'video'].indexOf(it.stage) !== -1) return 'f_contrato';
+        return 'outros';
       }
     };
   }
@@ -2563,6 +2615,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     },
     inatividade: layoutPorMes('Inatividade (PPP de meses anteriores)', 'ppp'),
     relnovos: layoutPorMes('Relacionamento Novos (PPF de meses anteriores)', 'ppf'),
+    fundo1: layoutFundo('I'),
+    fundo2: layoutFundo('II'),
     relrd: {
       nome: 'Pipeline Relacionamento RD',
       esteira: 'relrd',
@@ -2821,7 +2875,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (LC.completo && LC.completo.daCopia && !totalZeev()) return LC.completo.funil || '';   // p\u00e1gina ainda sem total
     var lay = layoutInstAtivo();
     if (lay === 'financeiro' && LC.url) return finModo() === 'kanban' ? 'fin' : 'nada';   // financeiro: lista m\u00ednima
-    if (lay === 'relrd' && LC.url) return 'rel';                                           // s\u00f3 o fluxo Relacionamento
+    if (lay === 'relrd' && LC.url) return 'rel';
+    if (/^fundo/.test(lay) && LC.url) return 'juridico';                                   // fundos: s\u00f3 as negocia\u00e7\u00f5es                                           // s\u00f3 o fluxo Relacionamento
     if (lay === 'diretor') lay = 'comercial';                       // usa o mesmo funil da esteira comercial
     if ((lay !== 'comercial' && lay !== 'juridico' && lay !== 'inatividade' && lay !== 'relnovos') || !LC.url) return '';
     if (new URL(LC.url).searchParams.get('codFlowsOrServices')) return '';
@@ -3315,9 +3370,15 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       ['triagem', 'Pipeline da Triagem'], ['inatividade', 'Pipeline Inatividade'], ['relnovos', 'Pipeline Relacionamento'],
       ['rejeitados', 'Pipeline Rejeitados'], ['status', 'Pipeline Status'], ['relrd', 'Pipeline Relacionamento RD']] },
     { id: 'juridico', nome: 'Diretoria Jur\u00eddico', itens: [['juridico', 'Pipeline Jur\u00eddico']] },
-    { id: 'financeiro', nome: 'Controladoria', itens: [['financeiro', 'Pipeline Controladoria']], so: function () { return financeiroLiberado(); } }
+    { id: 'financeiro', nome: 'Controladoria', itens: [['financeiro', 'Pipeline Controladoria']], so: function () { return financeiroLiberado(); } },
+    { id: 'fundo1', nome: 'Fundo I', itens: [['fundo1', 'Pipeline Fundo I']], fundo: true, so: function () { return ls('lcbFundo1') === 'on'; } },
+    { id: 'fundo2', nome: 'Fundo II', itens: [['fundo2', 'Pipeline Fundo II']], fundo: true, so: function () { return ls('lcbFundo2') === 'on'; } }
   ];
-  function areasVisiveis() { return AREAS_PIPE.filter(function (a) { return !a.so || a.so(); }); }
+  function computadorDeFundo() { return ls('lcbFundo1') === 'on' || ls('lcbFundo2') === 'on'; }
+  function areasVisiveis() {
+    var vis = AREAS_PIPE.filter(function (a) { return !a.so || a.so(); });
+    return computadorDeFundo() ? vis.filter(function (a) { return a.fundo; }) : vis;   // externos: s\u00f3 o pr\u00f3prio fundo
+  }
   function areaDoLayout(lay) {
     var salva = ls('lcbKanbanAreaSel'), vis = areasVisiveis();
     var tem = function (a) { return a.itens.some(function (x) { return x[0] === lay; }); };
@@ -3334,6 +3395,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     uiI.layout.__area = A.id;
   }
   function layoutInstAtivo() {
+    if (computadorDeFundo()) {                                  // computador de fundo: s\u00f3 as vis\u00f5es liberadas
+      var liberadas = ['fundo1', 'fundo2'].filter(function (k) { return ls('lcbFundo' + k.slice(-1)) === 'on'; });
+      return liberadas.indexOf(stInst.layout) !== -1 ? stInst.layout : liberadas[0];
+    }
+    if (/^fundo/.test(stInst.layout)) return ESTEIRA_INST_PADRAO[ls('lcbKanbanArea')] || 'comercial';
     if (stInst.layout === 'financeiro' && !financeiroLiberado()) return ESTEIRA_INST_PADRAO[ls('lcbKanbanArea')] || 'comercial';
     return LAYOUTS_INST[stInst.layout] ? stInst.layout :
       (ESTEIRA_INST_PADRAO[ls('lcbKanbanArea')] || 'comercial');
@@ -4789,6 +4855,14 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     // s\u00f3 entram processos em etapas do jur\u00eddico (a menos que "Mostrar outras \u00e1reas" esteja marcado).
     var foraDaArea = 0, foraDoTime = 0;
     var buscando = !!stInst.busca;
+    if (/^fundo/.test(layoutId) && !FINFORM.carregando && LC.base && FINFORM.chave !== 'fundos|' + LC.base && listaPronta()) {
+      FINFORM.carregando = true; FINFORM.chave = 'fundos|' + LC.base;
+      var hojeF = new Date(), flF = fluxosNegociacao(), iF = 0; hojeF.setHours(0, 0, 0, 0);
+      (function proxF() {
+        if (iF >= flF.length) { FINFORM.carregando = false; FINFORM.em = new Date(); if (!FORM.em) FORM.em = new Date(); setTimeout(salvarCache, 0); return renderInst(); }
+        lerFormPai(flF[iF++], { limpo: true }, new Date(hojeF.getTime() - 240 * DIA), hojeF, {}).then(proxF, proxF);
+      })();
+    }
     if (layoutId === 'financeiro' || ((layoutId === 'comercial' || layoutId === 'juridico' || layoutId === 'diretor') && lidos.some(function (it) { return it.tipo === 'filho'; }))) {
       var velhoF = !FORM.em || FORM.base !== LC.base || Date.now() - FORM.em.getTime() > 10 * 60000;
       if (velhoF && !FORM.carregando && listaPronta() && !(FORM.erro && FORM.base === LC.base)) setTimeout(carregarFormularios, 0);
@@ -4808,11 +4882,12 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       LB.itens.forEach(function (it) { if (!ja[it.num]) lidos.push(it); });
     }
     if (stInst.comigo && MEU.nums) lidos = lidos.filter(function (it) { return MEU.nums[it.num]; });
-    var semRecorte = buscando || stInst.comigo;                        // busca e "Comigo" ignoram esteira/time/pessoa
+    var ehFundo = /^fundo/.test(layoutId);
+    var semRecorte = !ehFundo && (buscando || stInst.comigo);         // busca e "Comigo" ignoram esteira/time/pessoa (exceto nos fundos)
     var todos = lidos.filter(function (it) {
       if (semRecorte) return true;
       if (layoutId === 'relrd' && stInst.relStatus && it.tipo === 'relacionamento' && statusRel(it) !== stInst.relStatus) return false;
-      if (L.esteira && !stInst.outras && L.place(it) === 'outros') { foraDaArea++; return false; }
+      if (L.esteira && (!stInst.outras || ehFundo) && L.place(it) === 'outros') { foraDaArea++; return false; }
       if (stInst.time && timeDe(it) !== stInst.time && !(timeDe(it) === 'filho' && stInst.time !== 'triagem')) {
         foraDoTime++;
         return false;
@@ -4962,7 +5037,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         if (nFila) ind.appendChild(el('span', 'lcbk-ind-x is-fila', fmtN(nFila) + ' sem respons\u00e1vel'));
         h.appendChild(ind);
       }
-      if (list.length) {
+      if (list.length && !/^fundo/.test(layoutId)) {
         var bx = el('button', 'lcbk-exp', 'Exportar');
         bx.type = 'button';
         bx.title = 'Baixar esta coluna em planilha (CSV), com nome, CPF, telefone e e-mail';
@@ -5156,7 +5231,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       if (!temNaArea) { uiI.area.value = areaDoLayout(layoutId); montarPipelines(uiI.area.value); }
     }
     uiI.layout.value = layoutId;
-    uiI.outras.parentNode.style.display = L.esteira ? '' : 'none';
+    uiI.outras.parentNode.style.display = L.esteira && !/^fundo/.test(layoutId) ? '' : 'none';
+    if (/^fundo/.test(layoutId)) {                                       // externos: s\u00f3 o essencial na barra
+      [uiI.btnComigo, uiI.btnFixo, uiI.btnResumo, uiI.fTime, uiI.fAtor, uiI.fPeriodo].forEach(function (b) { if (b) b.style.display = 'none'; });
+      uiI.resumo.style.display = 'none';
+    }
     uiI.outras.checked = stInst.outras;
   }
 
