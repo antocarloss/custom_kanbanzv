@@ -359,7 +359,8 @@
           ['reprovacao', 'Pend\u00eancias', ['juridico', 'conselho'], ['pendjur', 'reprovacao']],
           ['contrato', 'Contrato & Assinatura', ['juridico'], ['contrato']],
           ['video', 'V\u00eddeo de aceite', ['juridico'], ['video']],
-          ['cessao', 'Cess\u00e3o & Protocolo', ['juridico'], ['cessao', 'gestora']],
+          ['gestora', 'Aguardando Aprova\u00e7\u00e3o da Gestora', ['juridico'], ['gestora']],
+          ['cessao', 'Cess\u00e3o & Protocolo', ['juridico'], ['cessao']],
           ['pos', 'P\u00f3s-cess\u00e3o', ['juridico'], ['pos']]
         ]
       },
@@ -525,7 +526,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-18b';
+  var VERSAO = '2026-11-19c';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -1009,10 +1010,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       : n >= 1e3 ? 'R$ ' + Math.round(n / 1e3).toLocaleString('pt-BR') + ' mil' : 'R$ ' + Math.round(n).toLocaleString('pt-BR');
   }
   function mascararCpf(cpf) { return '***.' + cpf.slice(4, 11) + '-**'; }
-  function blocoInfo(c, info, comNome, colId) {
+  function blocoInfo(c, info, comNome, colId, semCpf) {
     if (!info) return;
     if (comNome && info.nome) c.appendChild(el('div', 'lcbk-cli', info.nome));
-    if (info.cpf) {
+    if (info.cpf && !semCpf) {
       var completo = CFG.resumo.cpf === 'completo';
       var lin = el('div', 'lcbk-proc');
       lin.appendChild(el('span', null, 'CPF '));
@@ -1045,6 +1046,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var perdidaCol = /^perd|^rejJur/.test(colId || '');
     var rotProp = colId === 'fechados' || colId === 'pos' ? 'Valor pago' : aceita ? 'Proposta aceita' : perdidaCol ? '\u00daltima proposta' : 'Proposta vigente';
     if (info.face) linhas.push([info.faceRot ? 'Valor de face (honor\u00e1rios)' : 'Valor de face', info.face, '', 'is-face']);
+    else if (semCpf) linhas.push(['Valor de face', 'n\u00e3o informado', '', 'is-vazio']);   // jur\u00eddico: sempre mostra a face
     if (info.proposta) linhas.push([rotProp, info.proposta, '', 'is-valor']);
     else if (info.semProposta) linhas.push([rotProp, 'sem proposta', '', 'is-vazio']);
     var elMot = null;
@@ -1069,8 +1071,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     c.appendChild(g);
     if (elMot) c.appendChild(elMot);
   }
-  function chipTipo(tags, info) {
-    if (info && info.tipo) tags.appendChild(el('span', 'lcbk-chip is-ativo', info.tipo));
+  function chipTipo(tags, info, semTipo) {
+    if (info && info.tipo && !semTipo) tags.appendChild(el('span', 'lcbk-chip is-ativo', info.tipo));
     if (info && info.tentUlt) {
       var hU = (Date.now() - info.tentUlt) / 3600000, lim = CFG.producao.tentativaIntervaloH;
       var tx = hU < 1 ? '\u00faltima h\u00e1 ' + Math.max(1, Math.round(hU * 60)) + ' min' : hU < 48 ? '\u00faltima h\u00e1 ' + Math.floor(hU) + 'h' : '\u00faltima h\u00e1 ' + Math.floor(hU / 24) + ' dias';
@@ -1238,7 +1240,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   var COR_COLUNA = {
     triagem: '#003050', acompanhar: '#004065', ppf: '#030094', ppp: '#182EFF', negociacao: '#182EFF',
     proposta: '#030094', pendencias: '#020381', fecCom: '#004065', cessao: '#020381', fechados: '#003050',
-    administrativo: '#004065', st_admin: '#004065',
+    administrativo: '#004065', st_admin: '#004065', gestora: '#030094',
     documentacao: '#003050', analise: '#004065', reprovacao: '#020381', contrato: '#030094', video: '#020381', pos: '#003050'
   };
   function corDaColuna(c, i) {
@@ -1324,14 +1326,24 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (flag) top.appendChild(el('span', 'lcbk-flag ' + flag[1], flag[0]));
     c.appendChild(top);
 
+    var jurT = layoutId === 'juridico';
+    if (jurT) {                                              // jur\u00eddico: tipo/fundo/prioridade \u2192 cliente \u2192 aplicativo \u2192 tarefa
+      cabecalhoJur(c, it);
+      var nomeCli = (it.info && it.info.nome) || (it.kind === 'tarefa' ? '' : it.titulo);
+      c.appendChild(el('div', 'lcbk-title', nomeCli || it.titulo));
+      if (it.processo) c.appendChild(el('div', 'lcbk-app', nomeAplicativoJur(it.processo)));
+      if (nomeCli && it.titulo !== nomeCli) c.appendChild(el('div', 'lcbk-app lcbk-atv', it.titulo));
+      blocoInfo(c, it.info, false, null, true);
+    } else {
     c.appendChild(el('div', 'lcbk-title', it.titulo));
     if (lead && it.atividade && it.atividade !== it.titulo) c.appendChild(el('div', 'lcbk-app', it.atividade));
     blocoInfo(c, it.info, it.kind === 'tarefa');
     if (it.processo) c.appendChild(el('div', 'lcbk-app', it.processo));
+    }
 
     var tags = el('div', 'lcbk-tags');
     tags.appendChild(el('span', 'lcbk-tipo is-' + it.tipo, NOME_TIPO[it.tipo] || NOME_TIPO.pai));
-    chipTipo(tags, it.info);
+    chipTipo(tags, it.info, layoutId === 'juridico');
     var mostrarEtapa = !it.finalizado && it.stage && it.stage !== 'outros' && !(it._col && it._col.unica) &&
       !(it.tipo !== 'filho' && it.stage === 'triagem');
     if (mostrarEtapa) tags.appendChild(el('span', 'lcbk-chip', NOME_ETAPA[it.stage] || it.stage));
@@ -1868,6 +1880,17 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '@media print{.lcbk-bar,.lcbk-fin-acoes,.lcbk-seg-wrap,.lcbk-fin-per{display:none!important}}',
       '.lcbk-col[data-col="administrativo"],.lcbk-col[data-col="st_admin"]{--lcbk-cor:#004065}',
       '.lcbk-area{font-weight:600;color:#003050;min-width:170px}',
+      '.lcbk-jur-cab{display:flex;flex-wrap:wrap;gap:5px;margin:2px 0 6px}',
+      '.lcbk-jur-tag{font-family:"Karla","Lato",system-ui,sans-serif;font-weight:700;font-size:11.5px;border-radius:6px;padding:2px 8px}',
+      '.lcbk-jur-tag.is-tipo{background:#003050;color:#fff}',
+      '.lcbk-jur-tag.is-fundo{background:#EEF0FF;color:#030094}',
+      '.lcbk-jur-tag.is-prio.is-normal{background:#FFF6DB;color:#7A5200}',
+      '.lcbk-jur-tag.is-prio.is-urg{background:#FFE2C2;color:#9A3A00}',
+      '.lcbk-jur-tag.is-prio.is-compl{background:#FFD3C9;color:#9F1D0A}',
+      '.lcbk-jur-tag.is-prio.is-max{background:#C8102E;color:#fff}',
+      '.lcbk-card.lcbk-prio-urg{border-left:3px solid #F28C28}',
+      '.lcbk-card.lcbk-prio-compl{border-left:3px solid #E4572E}',
+      '.lcbk-card.lcbk-prio-max{border-left:4px solid #C8102E;box-shadow:0 0 0 1px rgba(200,16,46,.25)}',
       '.lcbk-campo{display:inline-flex;flex-direction:column;gap:2px;margin:0}',
       '.lcbk-rot{font-family:"Outfit","Montserrat",system-ui,sans-serif;font-weight:500;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#5B6B7F;padding-left:2px}',
       '.lcbk-mais{width:100%;margin-top:4px;background:#fff}',
@@ -2471,6 +2494,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       cols: function () {
         return colunasEsteira(id).map(function (c) {
           c.precisaB = false;
+          if (c.id === 'gestora') c.dica = 'T27 solicitada \u00e0 gestora \u00b7 T28 Fundo I \u00b7 T29 Fundo II';
           if (c.id === 'pos') { c.name = 'Pagos'; c.ok = true; c.encerrada = true; c.dica = 'chegou na T30 (finaliza\u00e7\u00e3o da compra), T31 ou depois, ou conclu\u00edda'; }
           return c;
         })
@@ -3286,6 +3310,27 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     return it.quem + (it.mais ? ' e mais ' + it.mais : '');
   }
 
+  // Cabe\u00e7alho do card na Diretoria Jur\u00eddico Anal\u00edtico: tipo do ativo, fundo e prioridade (cores quentes)
+  function cabecalhoJur(c, it) {
+    var cab = el('div', 'lcbk-jur-cab'), infJ = it.info || {}, fJ = FORM.porSol[it.num] || {};
+    var tipoA = infJ.tipo || fJ.tipo || '';
+    if (tipoA) cab.appendChild(el('span', 'lcbk-jur-tag is-tipo', /rpv/i.test(tipoA) ? 'RPV' : 'Precat\u00f3rio'));
+    var fdJ = it.tipo === 'filho' ? fundoDe(it) : '';
+    cab.appendChild(el('span', 'lcbk-jur-tag is-fundo', fdJ ? 'Fundo ' + fdJ : 'Fundo n\u00e3o informado'));
+    if (fJ.prioridade) {
+      var pr = semAcentoMin(fJ.prioridade), clsP = /maxim/.test(pr) ? 'is-max' : /complic/.test(pr) ? 'is-compl' : /urgent/.test(pr) ? 'is-urg' : 'is-normal';
+      cab.appendChild(el('span', 'lcbk-jur-tag is-prio ' + clsP, fJ.prioridade));
+      if (clsP !== 'is-normal') c.classList.add('lcbk-prio-' + clsP.slice(3));
+    }
+    c.appendChild(cab);
+  }
+  function nomeAplicativoJur(p) {
+    var t = semAcentoMin(p);
+    if (/contratual/.test(t)) return 'Honor\u00e1rios Contratuais';
+    if (/sucumb/.test(t)) return 'Honor\u00e1rios Sucumbenciais';
+    if (/autor/.test(t)) return 'Cr\u00e9dito Autor';
+    return p;
+  }
   function cardInst(it, layoutId) {
     var c = el('article', 'lcbk-card' + (it.late ? ' is-late' : it.today ? ' is-today' : '') +
       (!it.ativo ? ' is-done' : ''));
@@ -3307,13 +3352,16 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       it.fila ? ['Na fila', 'is-stuck'] : it.due && it.due.date ? ['A vencer', 'is-avencer'] : ['Sem prazo', 'is-semprazo'];
     if (flag) top.appendChild(el('span', 'lcbk-flag ' + flag[1], flag[0]));
     c.appendChild(top);
-    c.appendChild(el('div', 'lcbk-title', it.titulo));
-    if (it.processo) c.appendChild(el('div', 'lcbk-app', it.processo));
+    var jur = layoutId === 'juridico';                      // Diretoria Jur\u00eddico Anal\u00edtico: card pr\u00f3prio
+    if (jur) cabecalhoJur(c, it);
+    c.appendChild(el('div', 'lcbk-title', jur ? ((it.info && it.info.nome) || it.titulo) : it.titulo));   // nome do cliente
+    if (it.processo) c.appendChild(el('div', 'lcbk-app', jur ? nomeAplicativoJur(it.processo) : it.processo));
+    else if (jur && it.titulo && /negocia/i.test(it.titulo)) { /* sem nome no resumo: o t\u00edtulo j\u00e1 \u00e9 o aplicativo */ }
     if (it.atividade) c.appendChild(el('div', 'lcbk-app lcbk-atv', it.atividade));
-    blocoInfo(c, it.info, false, it._col && it._col.id);
+    blocoInfo(c, it.info, false, it._col && it._col.id, jur);
     var tags = el('div', 'lcbk-tags');
     tags.appendChild(el('span', 'lcbk-tipo is-' + it.tipo, NOME_TIPO[it.tipo] || NOME_TIPO.pai));
-    chipTipo(tags, it.info);
+    chipTipo(tags, it.info, jur);
     if (TEM_TENTATIVAS && it.tipo === 'filho' && it.ativo && !(it.info && it.info.tentTxt) && !(it.info && it.info.propN) &&
         (/negociar compra|proximo contato/.test(nomeTarefa(it.atividade)) || /^T01(\.01)?$/.test(codigoDe(it.atividade)))) {
       var z = el('span', 'lcbk-chip is-tent is-zero', 'Tentativas: 0 de ' + CFG.producao.tentativasSemSucesso);
@@ -3323,6 +3371,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (it.ativo && it.stage && it.stage !== 'outros' && !(it._col && it._col.unica) &&
         !(it.tipo !== 'filho' && it.stage === 'triagem')) {
       tags.appendChild(el('span', 'lcbk-chip', NOME_ETAPA[it.stage] || it.stage));
+    }
+    if (it.tipo === 'filho' && it.stage === 'gestora') {
+      var fdC = fundoDe(it);
+      tags.appendChild(el('span', 'lcbk-chip is-ativo', fdC ? 'Fundo ' + fdC : 'Fundo n\u00e3o informado'));
     }
     if (it.ativo && it.area && it._col && it._col.outras) {
       tags.appendChild(el('span', 'lcbk-chip is-area', CFG.nomesArea[it.area] || it.area));
@@ -3365,11 +3417,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function financeiroLiberado() { return ls(CFG.keys.financeiro) === 'on'; }
   // Organiza\u00e7\u00e3o do seletor: diretoria \u2192 pipelines. Um pipeline pode aparecer em mais de uma diretoria.
   var AREAS_PIPE = [
-    { id: 'executiva', nome: 'Diretoria Executiva', itens: [['comercial', 'Comercial'], ['juridico', 'Jur\u00eddico'], ['triagem', 'Triagem']] },
+    { id: 'executiva', nome: 'Diretoria Executiva', itens: [['comercial', 'Comercial'], ['juridico', 'Jur\u00eddico Anal\u00edtico'], ['triagem', 'Triagem']] },
     { id: 'comercial', nome: 'Diretoria Comercial', itens: [['comercial', 'Pipeline Comercial'], ['diretor', 'Pipeline Diretor Comercial'],
       ['triagem', 'Pipeline da Triagem'], ['inatividade', 'Pipeline Inatividade'], ['relnovos', 'Pipeline Relacionamento'],
       ['rejeitados', 'Pipeline Rejeitados'], ['status', 'Pipeline Status'], ['relrd', 'Pipeline Relacionamento RD']] },
-    { id: 'juridico', nome: 'Diretoria Jur\u00eddico', itens: [['juridico', 'Pipeline Jur\u00eddico']] },
+    { id: 'juridico', nome: 'Diretoria Jur\u00eddico', itens: [['juridico', 'Diretoria Jur\u00eddico Anal\u00edtico']] },
     { id: 'financeiro', nome: 'Controladoria', itens: [['financeiro', 'Pipeline Controladoria']], so: function () { return financeiroLiberado(); } },
     { id: 'fundo1', nome: 'Fundo I', itens: [['fundo1', 'Pipeline Fundo I']], fundo: true, so: function () { return ls('lcbFundo1') === 'on'; } },
     { id: 'fundo2', nome: 'Fundo II', itens: [['fundo2', 'Pipeline Fundo II']], fundo: true, so: function () { return ls('lcbFundo2') === 'on'; } }
@@ -3498,7 +3550,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   function moedaBR(n) { return 'R$ ' + Math.round(n).toLocaleString('pt-BR'); }
   var FORM = { porSol: {}, carregando: false, erro: '', em: null, base: '', incompleto: 0 };
-  var FORM_VERSAO = 12;                                         // muda quando a leitura do formul\u00e1rio ganha campos novos
+  var FORM_VERSAO = 13;                                         // muda quando a leitura do formul\u00e1rio ganha campos novos
   function lerFormCsv(txt, por) {
     var linhas = lerCsv(txt);
     if (!linhas.length) return 0;
@@ -3633,6 +3685,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       o.fVPP = porPadrao(/^vPP/i); o.fVSP = porPadrao(/^vSP/i);
       o.dtConcl = (function () { var d = lerData(clean(pega(r, ['Data de conclus\u00e3o']))); return d ? d.getTime() : 0; })();
       o.fundo = semDoc(pega(r, F.fundo));
+      o.prioridade = clean(pega(r, ['prioridadeDoProcesso']));
+      if (!o.prioridade) h.forEach(function (nome, k) { if (!o.prioridade && /^prioridadeDoProcesso/i.test(nome) && clean(r[k])) o.prioridade = clean(r[k]); });
       if (!o.fundo) h.forEach(function (nome, k) { if (!o.fundo && /^fundoResponsavel/i.test(nome) && clean(r[k])) o.fundo = semDoc(clean(r[k])); });
       var corta = function (t) { t = semDoc(t); return t.length > 220 ? t.slice(0, 217) + '\u2026' : t; };
       o.motJur = corta(pega(r, F.motivoJuridico));
