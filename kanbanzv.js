@@ -330,7 +330,8 @@
       assinatura: 'Assinatura (comercial)', video: 'V\u00eddeo de aceite', documentacao: 'Documenta\u00e7\u00e3o',
       analise: 'An\u00e1lise jur\u00eddica', reprovacao: 'Reprova\u00e7\u00e3o', pendjur: 'Pend\u00eancias (jur\u00eddico)', contrato: 'Contrato & Assinatura',
       cessao: 'Cess\u00e3o & Protocolo', pos: 'P\u00f3s-cess\u00e3o', triagem: 'Triagem', acompanhar: 'Acompanhar lead',
-      ppf: 'PPF (proposta futura)', ppp: 'PPP (negociar compra)', gestora: 'Aprova\u00e7\u00e3o da gestora', outros: 'Outra etapa'
+      ppf: 'PPF (proposta futura)', ppp: 'PPP (negociar compra)', gestora: 'Aprova\u00e7\u00e3o da gestora',
+      gestora1: 'Aprova\u00e7\u00e3o da gestora \u00b7 Fundo I', gestora2: 'Aprova\u00e7\u00e3o da gestora \u00b7 Fundo II', solgestora: 'Solicitar aprova\u00e7\u00e3o da gestora', outros: 'Outra etapa'
     },
     // Filas de grupo: o Zeev s\u00f3 informa o 1\u00ba nome e "+N". Para as filas conhecidas,
     // o Kanban mostra o nome da fila e quem faz parte dela. [fluxo, c\u00f3digo da atividade, nome, membros]
@@ -359,7 +360,9 @@
           ['reprovacao', 'Pend\u00eancias', ['juridico', 'conselho'], ['pendjur', 'reprovacao']],
           ['contrato', 'Contrato & Assinatura', ['juridico'], ['contrato']],
           ['video', 'V\u00eddeo de aceite', ['juridico'], ['video']],
-          ['gestora', 'Aguardando Aprova\u00e7\u00e3o da Gestora', ['juridico'], ['gestora']],
+          ['solgestora', 'T27-Solicitar Aprova\u00e7\u00e3o da Gestora', ['juridico'], ['solgestora']],
+          ['gestora1', 'Aguardando Aprova\u00e7\u00e3o da Gestora - Fundo 1', ['juridico'], ['gestora1']],
+          ['gestora2', 'Aguardando Aprova\u00e7\u00e3o da Gestora - Fundo 2', ['juridico'], ['gestora2']],
           ['cessao', 'Cess\u00e3o & Protocolo', ['juridico'], ['cessao']],
           ['pos', 'P\u00f3s-cess\u00e3o', ['juridico'], ['pos']]
         ]
@@ -526,7 +529,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-19e';
+  var VERSAO = '2026-11-19g';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -618,7 +621,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   // T16 = an\u00e1lise das pend\u00eancias, T22 = validar assinatura, T27 = finaliza\u00e7\u00e3o da compra\u2026). Por isso a
   // etapa \u00e9 reconhecida pelo NOME da tarefa; o c\u00f3digo s\u00f3 \u00e9 usado se o nome n\u00e3o for reconhecido.
   var ETAPA_POR_NOME = [
-    [/gestora/, 'juridico', 'gestora'],                    // T27-Solicitar Aprova\u00e7\u00e3o da Gestora, T28/T29-Aprova\u00e7\u00e3o da Gestora do Fundo
+    [/solicitar aprovacao da gestora/, 'juridico', 'solgestora'],   // T27: o jur\u00eddico pede a aprova\u00e7\u00e3o \u00e0 gestora
+    [/gestora.*fundo\s*(ii|2)\b/, 'juridico', 'gestora2'],          // T29-Aprova\u00e7\u00e3o da Gestora do Fundo II
+    [/gestora.*fundo\s*(i|1)\b/, 'juridico', 'gestora1'],           // T28-Aprova\u00e7\u00e3o da Gestora do Fundo I
+    [/gestora/, 'juridico', 'gestora'],                               // outra tarefa da gestora: fundo pelo formul\u00e1rio
     [/auditar pagamento|finalizacao da compra|liquidacao|astrea|acompanhamento do ativo|acompanhar o ativo/, 'juridico', 'pos'],
     [/aprovacao para o fundo|aprovacao do fundo|protocol|cessao de credito/, 'juridico', 'cessao'],
     [/validar.*video|video.*validar/, 'juridico', 'video'],
@@ -1240,7 +1246,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   var COR_COLUNA = {
     triagem: '#003050', acompanhar: '#004065', ppf: '#030094', ppp: '#182EFF', negociacao: '#182EFF',
     proposta: '#030094', pendencias: '#020381', fecCom: '#004065', cessao: '#020381', fechados: '#003050',
-    administrativo: '#004065', st_admin: '#004065', gestora: '#030094', prop_hoje: '#182EFF',
+    administrativo: '#004065', st_admin: '#004065', gestora: '#030094', prop_hoje: '#182EFF', gestora1: '#030094', gestora2: '#020381', solgestora: '#004065',
     documentacao: '#003050', analise: '#004065', reprovacao: '#020381', contrato: '#030094', video: '#020381', pos: '#003050'
   };
   function corDaColuna(c, i) {
@@ -2207,7 +2213,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   // Reconhecido pelo NOME da tarefa: vale para qualquer numera\u00e7\u00e3o do fluxo (regra \u00fanica, todos os pipelines)
   function noFormal(it) { return it.tipo === 'filho' && it.ativo && it.stage === 'pos'; }
   // etapas que s\u00f3 existem depois que o cliente aceitou a proposta (documenta\u00e7\u00e3o em diante)
-  var ETAPAS_ACEITE = ['documentacao', 'analise', 'pendjur', 'reprovacao', 'contrato', 'video', 'assinatura', 'pendencias', 'cessao', 'gestora'];
+  var ETAPAS_ACEITE = ['documentacao', 'analise', 'pendjur', 'reprovacao', 'contrato', 'video', 'assinatura', 'pendencias', 'cessao', 'solgestora', 'gestora', 'gestora1', 'gestora2'];
   function posAceite(it) {
     if (ETAPAS_ACEITE.indexOf(it.stage) !== -1) return true;
     return it.stage === 'outros' && CFG.producao.posAceite.indexOf(codigoDe(it.atividade)) !== -1;
@@ -2481,7 +2487,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
           return mot === 'juridico' ? 'perdJur' : mot === 'cliente' ? 'perdCli' : 'perdNI';
         }
         if (it.stage === 'pos' || noFormal(it)) return 'fechados';   // na T24 ou depois = fechado formalmente
-        if (it.stage === 'cessao' || it.stage === 'gestora') return 'cessao';
+        if (it.stage === 'cessao' || it.stage === 'solgestora' || /^gestora/.test(it.stage)) return 'cessao';
         var c2 = colunaDe(id, it);
         if (c2 === 'pendencias') return 'pendencias';
         if (posAceite(it)) return 'fecCom';
@@ -2494,8 +2500,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       cols: function () {
         return colunasEsteira(id).map(function (c) {
           c.precisaB = false;
-          if (c.id === 'gestora') c.dica = 'T27 solicitada \u00e0 gestora \u00b7 T28 Fundo I \u00b7 T29 Fundo II';
-          if (c.id === 'pos') { c.name = 'Pagos'; c.ok = true; c.encerrada = true; c.dica = 'chegou na T30 (finaliza\u00e7\u00e3o da compra), T31 ou depois, ou conclu\u00edda'; }
+          if (c.id === 'solgestora') c.dica = 'o jur\u00eddico ainda vai enviar \u00e0 gestora';
+          if (c.id === 'cessao') c.dica = 'T30-Acompanhar Finaliza\u00e7\u00e3o da Compra';
+          if (c.id === 'gestora1') c.dica = 'T28-Aprova\u00e7\u00e3o da Gestora do Fundo I';
+          if (c.id === 'gestora2') c.dica = 'T29-Aprova\u00e7\u00e3o da Gestora do Fundo II';
+          if (c.id === 'pos') { c.name = 'Pagos'; c.ok = true; c.encerrada = true; c.dica = 'chegou na T31 (auditoria do pagamento) ou depois, ou conclu\u00edda'; }
           return c;
         })
           .concat([{ id: 'rejJur', name: 'Rejeitadas pelo Jur\u00eddico', alert: true, encerrada: true,
@@ -2505,7 +2514,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       place: function (it) {
         // mesma regra do comercial: Pagos = passou da T24 (p\u00f3s-cess\u00e3o) ou negocia\u00e7\u00e3o conclu\u00edda sem perda
         if (it.tipo === 'filho' && !it.ativo && !perdida(it)) return 'pos';
-        if (it.tipo === 'filho' && it.ativo && noFormal(it)) return 'pos';      // na T24 ou depois
+        if (it.tipo === 'filho' && it.ativo && /finalizacao da compra/.test(nomeTarefa(it.atividade))) return 'cessao';   // T30 \u2192 Cess\u00e3o & Protocolo
+        if (it.tipo === 'filho' && it.ativo && noFormal(it)) return 'pos';      // T31 (auditoria) em diante \u2192 Pagos
+        if (it.ativo && it.stage === 'gestora') return fundoDe(it) === 'II' ? 'gestora2' : 'gestora1';
         if (!it.ativo) {
           if (it.tipo !== 'filho' || !perdida(it)) return 'outros';
           if (!PERDA.porSol && !PERDA.carregando && !PERDA.erro && listaPronta()) setTimeout(carregarMotivosPerda, 0);
@@ -2563,7 +2574,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       cols: function () {
         return [
           { id: 'f_contrato', name: 'Contrato & Assinatura', dica: 'contrato, assinatura e v\u00eddeo de aceite' },
-          { id: 'f_gestora', name: 'Aguardando Aprova\u00e7\u00e3o da Gestora', dica: 'solicitada a aprova\u00e7\u00e3o da gestora do Fundo ' + F },
+          { id: 'f_gestora', name: 'Aguardando Aprova\u00e7\u00e3o da Gestora', dica: 'com a gestora do Fundo ' + F + ' (' + (F === 'I' ? 'T28' : 'T29') + ')' },
           { id: 'f_pago', name: 'Cess\u00e3o & Protocolo', ok: true, encerrada: true, dica: 'opera\u00e7\u00f5es pagas (finaliza\u00e7\u00e3o da compra em diante)' },
           { id: 'outros', name: 'Outras', opcional: true, outras: true }
         ];
@@ -2572,7 +2583,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         if (it.tipo !== 'filho' || fundoDe(it) !== F) return 'outros';
         if (!it.ativo) return perdida(it) ? 'outros' : 'f_pago';
         if (it.stage === 'pos') return 'f_pago';
-        if (it.stage === 'gestora') return 'f_gestora';
+        if (/^gestora/.test(it.stage)) return 'f_gestora';
         if (['contrato', 'assinatura', 'video'].indexOf(it.stage) !== -1) return 'f_contrato';
         return 'outros';
       }
@@ -3387,7 +3398,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         !(it.tipo !== 'filho' && it.stage === 'triagem')) {
       tags.appendChild(el('span', 'lcbk-chip', NOME_ETAPA[it.stage] || it.stage));
     }
-    if (it.tipo === 'filho' && it.stage === 'gestora') {
+    if (it.tipo === 'filho' && /^gestora/.test(it.stage)) {
       var fdC = fundoDe(it);
       tags.appendChild(el('span', 'lcbk-chip is-ativo', fdC ? 'Fundo ' + fdC : 'Fundo n\u00e3o informado'));
     }
