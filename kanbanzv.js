@@ -526,7 +526,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-19c';
+  var VERSAO = '2026-11-19e';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -1240,7 +1240,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   var COR_COLUNA = {
     triagem: '#003050', acompanhar: '#004065', ppf: '#030094', ppp: '#182EFF', negociacao: '#182EFF',
     proposta: '#030094', pendencias: '#020381', fecCom: '#004065', cessao: '#020381', fechados: '#003050',
-    administrativo: '#004065', st_admin: '#004065', gestora: '#030094',
+    administrativo: '#004065', st_admin: '#004065', gestora: '#030094', prop_hoje: '#182EFF',
     documentacao: '#003050', analise: '#004065', reprovacao: '#020381', contrato: '#030094', video: '#020381', pos: '#003050'
   };
   function corDaColuna(c, i) {
@@ -2591,8 +2591,23 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     L.espelho = function (it) { return comAdministrativo(it) ? 'administrativo' : ''; };
     return L;
   }
+  // Diretoria Executiva \u2192 Comercial: mesma esteira + coluna "Propostas enviadas hoje" (todas as do dia)
+  function comPropostasHoje(L) {
+    var cols1 = L.cols;
+    L.nome = 'Comercial (Diretoria Executiva)';
+    L.propHoje = true;
+    L.cols = function () {
+      var c = cols1(), i = -1;
+      c.forEach(function (x, k) { if (x.id === 'proposta') i = k; });
+      c.splice(i >= 0 ? i + 1 : 0, 0, { id: 'prop_hoje', name: 'Propostas enviadas hoje',
+        dica: PHOJE.carregando && !PHOJE.em ? 'lendo as tarefas de hoje\u2026' : 'espelho: todas as propostas apresentadas ao cliente hoje \u00b7 o card mostra onde est\u00e1 agora' });
+      return c;
+    };
+    return L;
+  }
   var LAYOUTS_INST = {
     comercial: comColunaAdministrativo(layoutEsteiraInst('comercial')),
+    comercialExec: comPropostasHoje(comColunaAdministrativo(layoutEsteiraInst('comercial'))),
     juridico: layoutEsteiraInst('juridico'),
     triagem: layoutEsteiraInst('triagem'),
     diretor: {
@@ -2901,7 +2916,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (lay === 'financeiro' && LC.url) return finModo() === 'kanban' ? 'fin' : 'nada';   // financeiro: lista m\u00ednima
     if (lay === 'relrd' && LC.url) return 'rel';
     if (/^fundo/.test(lay) && LC.url) return 'juridico';                                   // fundos: s\u00f3 as negocia\u00e7\u00f5es                                           // s\u00f3 o fluxo Relacionamento
-    if (lay === 'diretor') lay = 'comercial';                       // usa o mesmo funil da esteira comercial
+    if (lay === 'diretor' || lay === 'comercialExec') lay = 'comercial';   // usa o mesmo funil da esteira comercial
     if ((lay !== 'comercial' && lay !== 'juridico' && lay !== 'inatividade' && lay !== 'relnovos') || !LC.url) return '';
     if (new URL(LC.url).searchParams.get('codFlowsOrServices')) return '';
     if (lay === 'inatividade' || lay === 'relnovos') {                 // s\u00f3 o Pai em andamento
@@ -3376,6 +3391,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var fdC = fundoDe(it);
       tags.appendChild(el('span', 'lcbk-chip is-ativo', fdC ? 'Fundo ' + fdC : 'Fundo n\u00e3o informado'));
     }
+    if (it._col && it._col.id === 'prop_hoje' && PHOJE.sols[it.num]) {
+      tags.appendChild(el('span', 'lcbk-chip is-tent', 'Enviada hoje ' + PHOJE.sols[it.num].toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })));
+    }
     if (it.ativo && it.area && it._col && it._col.outras) {
       tags.appendChild(el('span', 'lcbk-chip is-area', CFG.nomesArea[it.area] || it.area));
     }
@@ -3417,7 +3435,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function financeiroLiberado() { return ls(CFG.keys.financeiro) === 'on'; }
   // Organiza\u00e7\u00e3o do seletor: diretoria \u2192 pipelines. Um pipeline pode aparecer em mais de uma diretoria.
   var AREAS_PIPE = [
-    { id: 'executiva', nome: 'Diretoria Executiva', itens: [['comercial', 'Comercial'], ['juridico', 'Jur\u00eddico Anal\u00edtico'], ['triagem', 'Triagem']] },
+    { id: 'executiva', nome: 'Diretoria Executiva', itens: [['comercialExec', 'Comercial'], ['juridico', 'Jur\u00eddico Anal\u00edtico'], ['triagem', 'Triagem']] },
     { id: 'comercial', nome: 'Diretoria Comercial', itens: [['comercial', 'Pipeline Comercial'], ['diretor', 'Pipeline Diretor Comercial'],
       ['triagem', 'Pipeline da Triagem'], ['inatividade', 'Pipeline Inatividade'], ['relnovos', 'Pipeline Relacionamento'],
       ['rejeitados', 'Pipeline Rejeitados'], ['status', 'Pipeline Status'], ['relrd', 'Pipeline Relacionamento RD']] },
@@ -3907,6 +3925,52 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   // Valores do formul\u00e1rio para o financeiro: o export por fluxo corta em 1.000 linhas, e as negocia\u00e7\u00f5es
   // conclu\u00eddas/antigas ficavam de fora. Aqui l\u00ea por per\u00edodo (dividindo at\u00e9 caber), todas as situa\u00e7\u00f5es.
   var FINFORM = { chave: '', carregando: false, em: null, erro: '' };
+  // Propostas enviadas hoje: negocia\u00e7\u00f5es com a tarefa "Apresentar Proposta\u2026" recebida ou finalizada hoje (log do Zeev)
+  var PHOJE = { chave: '', carregando: false, em: null, sols: {} };
+  function carregarPropostasHoje() {
+    if (PHOJE.carregando || !LC.base) return;
+    var hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    var chave = LC.base + '|' + ddmmaaaa(hoje);
+    if (PHOJE.chave === chave && PHOJE.em && Date.now() - PHOJE.em.getTime() < 10 * 60000) return;
+    PHOJE.carregando = true; PHOJE.chave = chave;
+    var ini = new Date(hoje.getTime() - 180 * DIA), amanha = new Date(hoje.getTime() + DIA), acc = [];
+    var hj = '&endBegin=' + encodeURIComponent(ddmmaaaa(hoje)) + '&endEnd=' + encodeURIComponent(ddmmaaaa(hoje));
+    var fila = [];
+    fluxosNegociacao().forEach(function (f) { fila.push([f, 'S', '', 'N']); fila.push([f, 'S', '', 'S']); fila.push([f, 'N', hj, 'S']); });
+    var est = { consultas: 0, incompleto: 0, taskStatus: 'S' }, i = 0;
+    (function prox() {
+      if (i >= fila.length) {
+        var sols = {};
+        acc.forEach(function (x) {
+          if (!x.sol || !/apresentar proposta/.test(nomeTarefa(x.nome))) return;
+          var d = x.rec && x.rec >= hoje && x.rec < amanha ? x.rec : x.fin && x.fin >= hoje && x.fin < amanha ? x.fin : null;
+          if (d && (!sols[x.sol] || d > sols[x.sol])) sols[x.sol] = d;
+        });
+        PHOJE.sols = sols; PHOJE.em = new Date(); PHOJE.carregando = false; acc = null;
+        buscarPropostasFora();
+        return renderInst();
+      }
+      var t = fila[i++]; est.taskStatus = t[3];
+      baixarRecorte(t[0], t[1], ini, hoje, t[2], acc, est).then(prox, prox);
+    })();
+  }
+  function buscarPropostasFora() {
+    var carregados = {};
+    (LC.completo ? LC.completo.itens : []).forEach(function (it) { carregados[it.num] = 1; });
+    PHOJE.extra = PHOJE.extra || {};
+    var faltam = Object.keys(PHOJE.sols).filter(function (s) { return !carregados[s] && !PHOJE.extra[s]; }).slice(0, 80);
+    if (!faltam.length || !LC.base) return;
+    var i = 0;
+    (function prox() {
+      if (i >= faltam.length) return renderInst();
+      var sol = faltam[i++], u = new URL(LC.base);
+      ['codFlowsOrServices', 'flowStatus', 'startBegin', 'startEnd', 'endBegin', 'endEnd'].forEach(function (k) { u.searchParams.delete(k); });
+      u.searchParams.set('keyword', sol); u.searchParams.set('pagenumber', '1'); u.searchParams.set('recordsperpage', '10');
+      getJson(nossa(u.href)).then(function (j) {
+        ((j && j.success && j.success.itens) || []).forEach(function (x) { var it = daApi(x); if (it.num === sol) PHOJE.extra[sol] = it; });
+      }).catch(function () { /* segue */ }).then(function () { setTimeout(prox, 150); });
+    })();
+  }
   function carregarFormFinanceiro() {
     if (FINFORM.carregando || !LC.base) return;
     var J = finJanela(), hoje = new Date(); hoje.setHours(0, 0, 0, 0);
@@ -4903,8 +4967,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var lidos = itensDaLista();
     var completo = completoServe();
     if (!completo && LC.completo && LC.completo.base === LC.base && !LC.carregando) setTimeout(agendarAuto, 0);   // esteira pede outra carga
-    var layoutId = layoutInstAtivo();
-    var L = LAYOUTS_INST[layoutId];
+    var layoutReal = layoutInstAtivo();
+    var L = LAYOUTS_INST[layoutReal];
+    var layoutId = layoutReal === 'comercialExec' ? 'comercial' : layoutReal;     // mesmas regras da esteira comercial
     // O resumo por pessoa e o filtro "Com quem" seguem a esteira escolhida: na Esteira jur\u00eddica,
     // s\u00f3 entram processos em etapas do jur\u00eddico (a menos que "Mostrar outras \u00e1reas" esteja marcado).
     var foraDaArea = 0, foraDoTime = 0;
@@ -4973,6 +5038,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         return { id: 'mes_' + k, name: nomeMesChave(k), dica: etapaM === 'ppp' ? 'PPP abertos neste m\u00eas e ainda parados' : 'PPF abertos neste m\u00eas e ainda em PPF' };
       });
     }
+    if (L.propHoje && listaPronta()) carregarPropostasHoje();
     if (layoutId === 'relrd') {                                       // colunas = motivos (ordem do funil do RD)
       carregarFormRel();
       var contR = {}, nomeR = {};
@@ -5030,6 +5096,15 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       buckets[col].push(it);
       if (L.espelho) { var esp = L.espelho(it); if (esp && esp !== col && buckets[esp]) buckets[esp].push(it); }   // c\u00f3pia, n\u00e3o move
     });
+    if (L.propHoje && buckets.prop_hoje) {                            // todas as propostas do dia, de qualquer per\u00edodo ou filtro
+      var jaPH = {};
+      lidos.concat(PHOJE.extra ? Object.keys(PHOJE.extra).map(function (k) { return PHOJE.extra[k]; }) : []).forEach(function (it) {
+        if (!it || it.tipo !== 'filho' || !PHOJE.sols[it.num] || jaPH[it.num]) return;
+        jaPH[it.num] = 1;
+        if (!it._enr) { it._enr = 1; if (it.atividade) { var clP = classificar(it.tipo, it.atividade); it.stage = clP.etapa; it.area = clP.area; } enriquecer(it); }
+        buckets.prop_hoje.push(it);
+      });
+    }
     // Se TODOS os carregados ca\u00edram numa \u00fanica coluna, o total do Zeev PODE ser o total dela,
     // mas s\u00f3 se a lista estiver filtrada por essa etapa. O script n\u00e3o tem como saber isso:
     // a pessoa confirma com um clique, e a confirma\u00e7\u00e3o vale s\u00f3 para esse total e essa coluna.
@@ -5281,10 +5356,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     });
     uiI.tools.style.display = stInst.view === 'kanban' ? '' : 'none';
     if (uiI.area) {
-      var temNaArea = [].some.call(uiI.layout.options, function (o) { return o.value === layoutId; });
-      if (!temNaArea) { uiI.area.value = areaDoLayout(layoutId); montarPipelines(uiI.area.value); }
+      var temNaArea = [].some.call(uiI.layout.options, function (o) { return o.value === layoutReal; });
+      if (!temNaArea) { uiI.area.value = areaDoLayout(layoutReal); montarPipelines(uiI.area.value); }
     }
-    uiI.layout.value = layoutId;
+    uiI.layout.value = layoutReal;
     uiI.outras.parentNode.style.display = L.esteira && !/^fundo/.test(layoutId) ? '' : 'none';
     if (/^fundo/.test(layoutId)) {                                       // externos: s\u00f3 o essencial na barra
       [uiI.btnComigo, uiI.btnFixo, uiI.btnResumo, uiI.fTime, uiI.fAtor, uiI.fPeriodo].forEach(function (b) { if (b) b.style.display = 'none'; });
