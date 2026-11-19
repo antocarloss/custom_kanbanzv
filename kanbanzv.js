@@ -529,7 +529,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-19g';
+  var VERSAO = '2026-11-20b';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -880,10 +880,20 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     return {
       nome: nome,
       cols: function () {
-        return colunasEsteira(id).map(function (c) { c.precisaB = false; return c; })
-          .concat([{ id: 'outros', name: 'Outras etapas', opcional: true }]);
+        return colunasEsteira(id).map(function (c) {
+          c.precisaB = false;
+          if (id === 'juridico' && c.id === 'pos') { c.name = 'Pagos'; c.ok = true; }
+          return c;
+        }).concat([{ id: 'outros', name: 'Outras etapas', opcional: true }]);
       },
-      place: function (it) { return comVoce(it) ? colunaDe(id, it) : null; }
+      place: function (it) {
+        if (!comVoce(it)) return null;
+        if (id === 'juridico' && it.tipo === 'filho') {
+          if (/finalizacao da compra/.test(nomeTarefa(it.atividade || it.titulo))) return 'cessao';   // T30
+          if (it.stage === 'gestora') return fundoDe(it) === 'II' ? 'gestora2' : 'gestora1';
+        }
+        return colunaDe(id, it);
+      }
     };
   }
   var LAYOUTS = {
@@ -1471,6 +1481,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var numsComigo = {};
     tarefas.forEach(function (t) { if (t.num) numsComigo[t.num] = true; });
     var layoutId = layoutAtivo();
+    if (layoutId === 'juridico') { carregarFormTarefas(); tarefas.forEach(enriquecer); }
     var equipe = layoutId === 'equipe';
     var itens = equipe ? lerEquipe() : tarefas.concat(lerLeads(numsComigo));
     var L = LAYOUTS[layoutId];
@@ -2812,6 +2823,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function fluxosNegociacao() {
     var naoNeg = CFG.producao.fluxos.filter(function (f) { return f[2] !== 'filho'; }).map(function (f) { return f[0]; });
     var daLista = fluxosDaBase().filter(function (f) { return naoNeg.indexOf(f[0]) === -1; });
+    if (daLista.length) { try { ls('lcbkFluxosNeg', JSON.stringify(daLista)); } catch (e) { /* ignora */ } }
     return daLista.length ? daLista : CFG.producao.fluxos.filter(function (f) { return f[2] === 'filho'; });
   }
 
@@ -4150,14 +4162,14 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       // ordem: campo > conclu\u00edda com comprovante (bateu com o fundo: 1924 em 10/11) > T27 > T28
       if (f.dtPag) { d = new Date(f.dtPag); via = 'campo'; }
       else if (f.comprovante && f.dtConcl) { d = new Date(f.dtConcl); via = 'conclusao'; }
-      else if (FIN.compra && FIN.compra[sol]) { d = FIN.compra[sol]; via = 'compra'; }
       else if (FIN.pag[sol]) { d = FIN.pag[sol]; via = 'pagamento'; }
       else if (f.assOk && f.nProp && /[1-9]/.test(f.nProp) && (FIN.val[sol] || FIN.ass[sol])) {
         var dA = FIN.val[sol] || FIN.ass[sol];                 // assinatura validada N\u00c3O \u00e9 pagamento: s\u00f3 conta no aviso
         if (dA >= de && dA < ate1) FIN.soAssinatura = (FIN.soAssinatura || 0) + 1;
       }
-      var chegou = (FIN.compra && FIN.compra[sol]) || FIN.pag[sol] || (f.comprovante && f.dtConcl);
-      if (d && !chegou) { FIN.semEtapa = (FIN.semEtapa || 0) + 1; d = null; }       // data no campo, mas n\u00e3o chegou na T27/T28
+      // Controladoria: s\u00f3 entra quem CHEGOU na T31-Auditar Pagamento (ou concluiu com comprovante). A T30 n\u00e3o conta.
+      var chegou = FIN.pag[sol] || (f.comprovante && f.dtConcl);
+      if (d && !chegou) { FIN.semEtapa = (FIN.semEtapa || 0) + 1; d = null; }
       if (d && d >= de && d < ate1) out.push({ sol: sol, pago: d, assin: FIN.ass[sol] || null, via: via });
     });
     return out;
@@ -4257,12 +4269,12 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var nP = Object.keys(FIN.nomesPago || {}), nA = Object.keys(FIN.nomesAss || {}), nC = Object.keys(FIN.nomesCompra || {});
     notas.push('Tarefa de compra no log: ' + (nC.length ? nC.join(' \u00b7 ') : 'nenhuma'));
     var conta = function (v) { return linhas.filter(function (l) { return l.via === v; }).length; };
-    notas.push('Crit\u00e9rio: ' + conta('campo') + ' pela data do pagamento no formul\u00e1rio \u00b7 ' + conta('compra') + ' pela chegada na Finaliza\u00e7\u00e3o da Compra (T30) \u00b7 ' +
+    notas.push('Crit\u00e9rio (s\u00f3 a partir da T31): ' + conta('campo') + ' pela data do pagamento no formul\u00e1rio \u00b7 ' +
       conta('pagamento') + ' pela chegada na Auditoria (T31) \u00b7 ' +
       conta('conclusao') + ' conclu\u00eddas com comprovante');
     var nCampoV = linhas.filter(function (l) { return (FORM.porSol[l.sol] || {}).vPagoFundo; }).length;
     notas.push('Valor pago: ' + nCampoV + ' de ' + linhas.length + ' pelo campo "Valor pago pelo fundo" (T31); os demais estimados pelo formul\u00e1rio');
-    if (FIN.semEtapa) notas.push(FIN.semEtapa + ' com data de pagamento no formul\u00e1rio, mas que ainda n\u00e3o chegaram na Finaliza\u00e7\u00e3o da Compra (T30) (n\u00e3o inclu\u00eddas)');
+    if (FIN.semEtapa) notas.push(FIN.semEtapa + ' com data de pagamento no formul\u00e1rio, mas que ainda n\u00e3o chegaram na T31-Auditar Pagamento (n\u00e3o inclu\u00eddas)');
     if (FIN.soAssinatura) notas.push(FIN.soAssinatura + ' negocia\u00e7\u00e3o(\u00f5es) com assinatura validada no per\u00edodo, sem confirma\u00e7\u00e3o de pagamento no Zeev (n\u00e3o inclu\u00eddas)');
     notas.push('Tarefas de pagamento no log: ' + (nP.length ? nP.join(' \u00b7 ') : 'nenhuma'));
     var dg = FIN.diagPag;
@@ -4480,8 +4492,25 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     uiI.fin.replaceChildren(box);
   }
   var FORMP = { em: null, chave: '', carregando: false, erro: '' };
+  // Executar tarefas (esteira jur\u00eddica): formul\u00e1rios das negocia\u00e7\u00f5es para fundo, valor de face e prioridade.
+  // Os fluxos de negocia\u00e7\u00e3o v\u00eam do que o Kanban viu em Acompanhar/Monitorar (salvo no navegador).
+  var FORMT = { carregando: false, em: 0 };
+  function carregarFormTarefas() {
+    if (FORMT.carregando || (FORMT.em && Date.now() - FORMT.em < 30 * 60000)) return;
+    FORMT.carregando = true;
+    var fl = [];
+    try { fl = JSON.parse(ls('lcbkFluxosNeg') || '[]'); } catch (e) { fl = []; }
+    if (!fl.length) fl = CFG.producao.fluxos.filter(function (f) { return f[2] === 'filho'; });
+    var hoje = new Date(), i = 0; hoje.setHours(0, 0, 0, 0);
+    var ini = new Date(hoje.getTime() - 365 * DIA);
+    (function prox() {
+      if (i >= fl.length) { FORMT.carregando = false; FORMT.em = Date.now(); if (!FORM.em) FORM.em = new Date(); return schedule(); }
+      lerFormPai(fl[i++], { limpo: true }, ini, hoje, {}).then(function () { schedule(); prox(); }, prox);
+    })();
+  }
+  var BASE_PADRAO = '/api/internal/bpms/1.0/instances?reportType=ihavepermission';
   function lerFormPai(fluxo, q, ini, fim, por, prof) {
-    var u = new URL(LC.base || baseDe(LC.url));
+    var u = new URL(LC.base || (LC.url ? baseDe(LC.url) : '') || (location.origin + BASE_PADRAO));
     u.pathname = u.pathname.replace(/\/instances\/?$/, '/instances/export/requests/csvsemicolon');
     ['pagenumber', 'recordsperpage', 'keyword', 'flowStatus', 'startBegin', 'startEnd', 'endBegin', 'endEnd'].forEach(function (k) { u.searchParams.delete(k); });
     if (q.limpo) {                                             // s\u00f3 permiss\u00e3o + fluxo + per\u00edodo: sem os filtros da lista
