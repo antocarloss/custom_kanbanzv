@@ -98,6 +98,7 @@
         ['144', '09f5cfe1-e50b-4ae6-b796-f98b67721377', 'carteira'],
         ['121', 'a70ebe16-6ed9-49d5-bd84-41417947efc1', 'filho'],
         ['128', '333a27bc-23a1-4663-80f8-52483f065654', 'filho'],
+        ['163', '2febb29d-cb69-4fcb-95f4-b6a5e771252b', 'filho'],   // Negocia\u00e7\u00e3o com Advogado Sucumbencial v2
         ['153', 'd8a2b914-5316-4224-bdf5-2cf874e6f8aa', 'relacionamento']
       ],
       inicioBase: '01/01/2020',   // solicita\u00e7\u00f5es em andamento abertas desde esta data
@@ -529,7 +530,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-20b';
+  var VERSAO = '2026-11-20c';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -1573,7 +1574,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       'Carregar todas (' + fmtN(Math.min(totT || 0, CFG.lista.maxItens)) + ')';
     if (LT.carregando) ui.btnTudo.textContent = LT.prog + ' Cancelar';
     ui.btnAtual.style.display = completoT && !LT.carregando && state.view === 'kanban' ? '' : 'none';
-    ui.status.textContent = st + (ocultos ? (st ? ' | ' : '') + ocultos + ' oculto(s) pelo filtro' : '') + ' | Kanban ' + VERSAO;
+    var stF = layoutId === 'juridico' ? (FORMT.carregando ? ' | lendo os formul\u00e1rios das negocia\u00e7\u00f5es\u2026' :
+      FORMT.em ? (FORMT.lidos ? ' | formul\u00e1rios: ' + fmtN(FORMT.lidos) : ' | formul\u00e1rios: nenhum lido (sem permiss\u00e3o de exportar solicita\u00e7\u00f5es?)') : '') : '';
+    ui.status.textContent = st + (ocultos ? (st ? ' | ' : '') + ocultos + ' oculto(s) pelo filtro' : '') + stF + ' | Kanban ' + VERSAO;
     document.documentElement.classList.toggle('lcbk-on', state.view === 'kanban');
     syncBar();
   }
@@ -2842,6 +2845,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       if (!LC.completo && !LC.carregando) setTimeout(function () { restaurarCache(b); }, 0);
       else if (LC.completo && !LC.carregando && velho(LC.completo)) setTimeout(carregarTudo, 300);
       LC.base = b;
+      try { var rtB = new URL(b).searchParams.get('reportType'); if (rtB) ls('lcbkReportType', rtB); } catch (e) { /* ignora */ }
       agendarAuto();
       if (uiI.board) { clearTimeout(timerI); timerI = setTimeout(renderInst, 150); }
     } catch (e) { /* ignora */ }
@@ -4501,11 +4505,25 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var fl = [];
     try { fl = JSON.parse(ls('lcbkFluxosNeg') || '[]'); } catch (e) { fl = []; }
     if (!fl.length) fl = CFG.producao.fluxos.filter(function (f) { return f[2] === 'filho'; });
-    var hoje = new Date(), i = 0; hoje.setHours(0, 0, 0, 0);
+    var cfgNeg = CFG.producao.fluxos.filter(function (f) { return f[2] === 'filho'; });
+    cfgNeg.forEach(function (f) { if (!fl.some(function (x) { return x[0] === f[0]; })) fl.push(f); });   // sempre os 3 fluxos v2
+    var hoje = new Date(); hoje.setHours(0, 0, 0, 0);
     var ini = new Date(hoje.getTime() - 365 * DIA);
-    (function prox() {
-      if (i >= fl.length) { FORMT.carregando = false; FORMT.em = Date.now(); if (!FORM.em) FORM.em = new Date(); return schedule(); }
-      lerFormPai(fl[i++], { limpo: true }, ini, hoje, {}).then(function () { schedule(); prox(); }, prox);
+    var tipos = ['ihavepermission'], salvo = ls('lcbkReportType');
+    if (salvo && tipos.indexOf(salvo) === -1) tipos.push(salvo);
+    ['iparticipate', 'my'].forEach(function (t) { if (tipos.indexOf(t) === -1) tipos.push(t); });
+    var ti = 0;
+    (function rodada() {
+      var i = 0, por = {}, rt = tipos[ti];
+      (function prox() {
+        if (i >= fl.length) {
+          FORMT.lidos = Object.keys(por).length;
+          if (!FORMT.lidos && ++ti < tipos.length) return rodada();          // nada com essa permiss\u00e3o: tenta a pr\u00f3xima
+          FORMT.carregando = false; FORMT.em = Date.now(); FORMT.rt = rt; if (!FORM.em) FORM.em = new Date();
+          return schedule();
+        }
+        lerFormPai(fl[i++], { limpo: true, reportType: rt }, ini, hoje, por).then(function () { schedule(); prox(); }, prox);
+      })();
     })();
   }
   var BASE_PADRAO = '/api/internal/bpms/1.0/instances?reportType=ihavepermission';
@@ -4514,7 +4532,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     u.pathname = u.pathname.replace(/\/instances\/?$/, '/instances/export/requests/csvsemicolon');
     ['pagenumber', 'recordsperpage', 'keyword', 'flowStatus', 'startBegin', 'startEnd', 'endBegin', 'endEnd'].forEach(function (k) { u.searchParams.delete(k); });
     if (q.limpo) {                                             // s\u00f3 permiss\u00e3o + fluxo + per\u00edodo: sem os filtros da lista
-      var rt = u.searchParams.get('reportType') || 'ihavepermission';
+      var rt = q.reportType || u.searchParams.get('reportType') || 'ihavepermission';
       u = new URL(u.origin + u.pathname);
       u.searchParams.set('reportType', rt);
     }
