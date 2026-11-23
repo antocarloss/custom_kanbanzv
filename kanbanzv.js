@@ -530,7 +530,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-21b';
+  var VERSAO = '2026-11-21c';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -1575,7 +1575,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (LT.carregando) ui.btnTudo.textContent = LT.prog + ' Cancelar';
     ui.btnAtual.style.display = completoT && !LT.carregando && state.view === 'kanban' ? '' : 'none';
     var stF = layoutId === 'juridico' ? (FORMT.carregando ? ' | lendo os formul\u00e1rios das negocia\u00e7\u00f5es\u2026' :
-      FORMT.em ? (FORMT.lidos ? ' | formul\u00e1rios: ' + fmtN(FORMT.lidos) : ' | formul\u00e1rios: nenhum lido' +
+      FORMT.em ? (FORMT.lidos ? ' | formul\u00e1rios: ' + fmtN(FORMT.lidos) + ' (' + Object.keys(FORMT.porFluxo || {}).map(function (k) {
+          var nm = { '121': 'Autor', '128': 'Contratual', '163': 'Sucumbencial' }[k] || k;
+          return nm + ' ' + fmtN(FORMT.porFluxo[k]) + (FORMT.porFluxo[k] ? '' : FORMT.erros[k] ? ' [' + FORMT.erros[k] + ']' : ' [vazio]');
+        }).join(' \u00b7 ') + ')' : ' | formul\u00e1rios: nenhum lido' +
         (FORMT.erros && Object.keys(FORMT.erros).length ? ' (' + Object.keys(FORMT.erros).slice(0, 4).map(function (k) { return 'fluxo ' + k.split(':')[0] + ': ' + FORMT.erros[k]; }).join('; ') + ')'
           : ' (o Zeev devolveu a exporta\u00e7\u00e3o vazia para este usu\u00e1rio)')) : '') : '';
     ui.status.textContent = st + (ocultos ? (st ? ' | ' : '') + ocultos + ' oculto(s) pelo filtro' : '') + stF + ' | Kanban ' + VERSAO;
@@ -4513,23 +4516,28 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var cfgNeg = CFG.producao.fluxos.filter(function (f) { return f[2] === 'filho'; });
     cfgNeg.forEach(function (f) { if (!fl.some(function (x) { return x[0] === f[0]; })) fl.push(f); });   // sempre os 3 fluxos v2
     var hoje = new Date(); hoje.setHours(0, 0, 0, 0);
-    var ini = new Date(hoje.getTime() - 365 * DIA);
+    var ini = new Date(hoje.getTime() - 3 * 365 * DIA);              // 3 anos: pega negocia\u00e7\u00f5es antigas ainda em andamento
     var tipos = ['ihavepermission'], salvo = ls('lcbkReportType');
     if (salvo && tipos.indexOf(salvo) === -1) tipos.push(salvo);
     ['iparticipate', 'my'].forEach(function (t) { if (tipos.indexOf(t) === -1) tipos.push(t); });
-    var ti = 0;
-    (function rodada() {
-      var i = 0, por = {}, rt = tipos[ti];
-      (function prox() {
-        if (i >= fl.length) {
-          FORMT.lidos = Object.keys(por).length;
-          if (!FORMT.lidos && ++ti < tipos.length) return rodada();          // nada com essa permiss\u00e3o: tenta a pr\u00f3xima
-          FORMT.carregando = false; FORMT.em = Date.now(); FORMT.rt = rt; if (!FORM.em) FORM.em = new Date();
-          return schedule();
-        }
-        var fAt = fl[i++];
-        lerFormPai(fAt, { limpo: true, reportType: rt }, ini, hoje, por).then(function () { schedule(); prox(); },
-          function (e) { FORMT.erros = FORMT.erros || {}; FORMT.erros[fAt[0] + ':' + rt] = (e && e.message) || 'erro'; prox(); });
+    // Cada fluxo \u00e9 lido separadamente: se um vier vazio com uma permiss\u00e3o, tenta as outras s\u00f3 para ele.
+    FORMT.porFluxo = {}; FORMT.erros = {}; FORMT.lidos = 0;
+    var i = 0;
+    (function proxFluxo() {
+      if (i >= fl.length) {
+        FORMT.carregando = false; FORMT.em = Date.now(); if (!FORM.em) FORM.em = new Date();
+        return schedule();
+      }
+      var fAt = fl[i++], ti = 0;
+      (function tentar() {
+        if (ti >= tipos.length) { FORMT.porFluxo[fAt[0]] = 0; return proxFluxo(); }
+        var rt = tipos[ti++], por = {};
+        lerFormPai(fAt, { limpo: true, reportType: rt }, ini, hoje, por).then(function () {
+          var n = Object.keys(por).length;
+          if (!n) return tentar();                                   // vazio: tenta a pr\u00f3xima permiss\u00e3o
+          FORMT.porFluxo[fAt[0]] = n; FORMT.lidos += n; delete FORMT.erros[fAt[0]];
+          schedule(); proxFluxo();
+        }, function (e) { FORMT.erros[fAt[0]] = (e && e.message) || 'erro'; tentar(); });
       })();
     })();
   }
