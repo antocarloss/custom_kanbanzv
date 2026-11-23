@@ -530,7 +530,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-20c';
+  var VERSAO = '2026-11-21b';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -1575,7 +1575,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (LT.carregando) ui.btnTudo.textContent = LT.prog + ' Cancelar';
     ui.btnAtual.style.display = completoT && !LT.carregando && state.view === 'kanban' ? '' : 'none';
     var stF = layoutId === 'juridico' ? (FORMT.carregando ? ' | lendo os formul\u00e1rios das negocia\u00e7\u00f5es\u2026' :
-      FORMT.em ? (FORMT.lidos ? ' | formul\u00e1rios: ' + fmtN(FORMT.lidos) : ' | formul\u00e1rios: nenhum lido (sem permiss\u00e3o de exportar solicita\u00e7\u00f5es?)') : '') : '';
+      FORMT.em ? (FORMT.lidos ? ' | formul\u00e1rios: ' + fmtN(FORMT.lidos) : ' | formul\u00e1rios: nenhum lido' +
+        (FORMT.erros && Object.keys(FORMT.erros).length ? ' (' + Object.keys(FORMT.erros).slice(0, 4).map(function (k) { return 'fluxo ' + k.split(':')[0] + ': ' + FORMT.erros[k]; }).join('; ') + ')'
+          : ' (o Zeev devolveu a exporta\u00e7\u00e3o vazia para este usu\u00e1rio)')) : '') : '';
     ui.status.textContent = st + (ocultos ? (st ? ' | ' : '') + ocultos + ' oculto(s) pelo filtro' : '') + stF + ' | Kanban ' + VERSAO;
     document.documentElement.classList.toggle('lcbk-on', state.view === 'kanban');
     syncBar();
@@ -2121,6 +2123,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       if (!info.viab && /^viabilidade/.test(r)) { info.viab = v; return; }
       if (!info.statusCom && /^status (comercial|do comercial|da negocia)/.test(r)) { info.statusCom = v; return; }
       if (!info.etapaRD && /^etapa no rd/.test(r)) { info.etapaRD = v; return; }
+      if (!info.fundoR && /^fundo( respons[a\u00e1]vel)?\b/.test(r)) { info.fundoR = v; return; }
+      if (!info.prio && /^prioridade/.test(r)) { info.prio = v; return; }
       if (info.tentTxt == null && /tentativa/.test(r)) { info.tentTxt = clean(p.valor); return; }
       if (/n[u\u00fa]mero/.test(r)) return;                       // "n\u00famero da proposta" n\u00e3o \u00e9 valor
       for (var i = 0; i < R.propostas.length; i++) {
@@ -2575,7 +2579,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var nm = nomeTarefa(it.atividade);                         // T28/T29: "Aprova\u00e7\u00e3o da Gestora do Fundo I/II" manda
     if (/fundo\s*(ii|2)\b/.test(nm)) return 'II';
     if (/fundo\s*(i|1)\b/.test(nm)) return 'I';
-    var f = FORM.porSol[it.num] || {}, v = lower(f.fundo || '');    // sen\u00e3o, o "Fundo Respons\u00e1vel" do formul\u00e1rio
+    var f = FORM.porSol[it.num] || {}, v = lower(f.fundo || (it.info && it.info.fundoR) || '');    // sen\u00e3o, o "Fundo Respons\u00e1vel" (formul\u00e1rio ou resumo)
     if (/\b(2|ii)\b/.test(v)) return 'II';
     if (/\b(1|i)\b/.test(v)) return 'I';
     return '';
@@ -3359,9 +3363,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (tipoA) cab.appendChild(el('span', 'lcbk-jur-tag is-tipo', /rpv/i.test(tipoA) ? 'RPV' : 'Precat\u00f3rio'));
     var fdJ = it.tipo === 'filho' ? fundoDe(it) : '';
     cab.appendChild(el('span', 'lcbk-jur-tag is-fundo', fdJ ? 'Fundo ' + fdJ : 'Fundo n\u00e3o informado'));
-    if (fJ.prioridade) {
-      var pr = semAcentoMin(fJ.prioridade), clsP = /maxim/.test(pr) ? 'is-max' : /complic/.test(pr) ? 'is-compl' : /urgent/.test(pr) ? 'is-urg' : 'is-normal';
-      cab.appendChild(el('span', 'lcbk-jur-tag is-prio ' + clsP, fJ.prioridade));
+    var prioJ = fJ.prioridade || infJ.prio;
+    if (prioJ) {
+      var pr = semAcentoMin(prioJ), clsP = /maxim/.test(pr) ? 'is-max' : /complic/.test(pr) ? 'is-compl' : /urgent/.test(pr) ? 'is-urg' : 'is-normal';
+      cab.appendChild(el('span', 'lcbk-jur-tag is-prio ' + clsP, prioJ));
       if (clsP !== 'is-normal') c.classList.add('lcbk-prio-' + clsP.slice(3));
     }
     c.appendChild(cab);
@@ -4522,7 +4527,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
           FORMT.carregando = false; FORMT.em = Date.now(); FORMT.rt = rt; if (!FORM.em) FORM.em = new Date();
           return schedule();
         }
-        lerFormPai(fl[i++], { limpo: true, reportType: rt }, ini, hoje, por).then(function () { schedule(); prox(); }, prox);
+        var fAt = fl[i++];
+        lerFormPai(fAt, { limpo: true, reportType: rt }, ini, hoje, por).then(function () { schedule(); prox(); },
+          function (e) { FORMT.erros = FORMT.erros || {}; FORMT.erros[fAt[0] + ':' + rt] = (e && e.message) || 'erro'; prox(); });
       })();
     })();
   }
