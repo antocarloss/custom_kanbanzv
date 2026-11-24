@@ -530,7 +530,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-24a';
+  var VERSAO = '2026-11-24b';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -654,6 +654,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function classificar(tipo, atividade) {
     if (atividade) {
       var nm = nomeTarefa(atividade), regras = tipo === 'filho' ? ETAPA_POR_NOME : ETAPA_PAI_POR_NOME;
+      // T26-Elaborar o Parecer Jur\u00eddico (v2): vai para "Contrato & Assinatura"
+      if (tipo === 'filho' && codigoDe(atividade) === 'T26' && /parecer/.test(nm)) return { area: 'juridico', etapa: 'contrato' };
       for (var i = 0; i < regras.length; i++) if (regras[i][0].test(nm)) return { area: regras[i][1], etapa: regras[i][2] };
     }
     var mapa = CFG.atividades[tipo] || CFG.atividades.filho;
