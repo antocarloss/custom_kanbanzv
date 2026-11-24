@@ -530,7 +530,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-21c';
+  var VERSAO = '2026-11-24a';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -1574,7 +1574,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       'Carregar todas (' + fmtN(Math.min(totT || 0, CFG.lista.maxItens)) + ')';
     if (LT.carregando) ui.btnTudo.textContent = LT.prog + ' Cancelar';
     ui.btnAtual.style.display = completoT && !LT.carregando && state.view === 'kanban' ? '' : 'none';
-    var stF = layoutId === 'juridico' ? (FORMT.carregando ? ' | lendo os formul\u00e1rios das negocia\u00e7\u00f5es\u2026' :
+    var semFormN = layoutId === 'juridico' ? tarefas.filter(function (t) { return t.tipo === 'filho' && !FORM.porSol[t.num]; }).length : 0;
+    var stF = layoutId === 'juridico' ? (semFormN && FORMT.em && !FORMT.carregando ? ' | ' + semFormN + ' tarefa(s) sem formul\u00e1rio lido' : '') + (FORMT.carregando ? ' | lendo os formul\u00e1rios das negocia\u00e7\u00f5es\u2026' :
       FORMT.em ? (FORMT.lidos ? ' | formul\u00e1rios: ' + fmtN(FORMT.lidos) + ' (' + Object.keys(FORMT.porFluxo || {}).map(function (k) {
           var nm = { '121': 'Autor', '128': 'Contratual', '163': 'Sucumbencial' }[k] || k;
           return nm + ' ' + fmtN(FORMT.porFluxo[k]) + (FORMT.porFluxo[k] ? '' : FORMT.erros[k] ? ' [' + FORMT.erros[k] + ']' : ' [vazio]');
@@ -1909,6 +1910,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-jur-tag{font-family:"Karla","Lato",system-ui,sans-serif;font-weight:700;font-size:11.5px;border-radius:6px;padding:2px 8px}',
       '.lcbk-jur-tag.is-tipo{background:#003050;color:#fff}',
       '.lcbk-jur-tag.is-fundo{background:#EEF0FF;color:#030094}',
+      '.lcbk-jur-tag.is-fundo.is-semform{background:#F1F3F6;color:#5B6B7F;border:1px dashed #C9D2DE}',
       '.lcbk-jur-tag.is-prio.is-normal{background:#FFF6DB;color:#7A5200}',
       '.lcbk-jur-tag.is-prio.is-urg{background:#FFE2C2;color:#9A3A00}',
       '.lcbk-jur-tag.is-prio.is-compl{background:#FFD3C9;color:#9F1D0A}',
@@ -2631,8 +2633,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     L.cols = function () {
       var c = cols1(), i = -1;
       c.forEach(function (x, k) { if (x.id === 'proposta') i = k; });
-      c.splice(i >= 0 ? i + 1 : 0, 0, { id: 'prop_hoje', name: 'Propostas enviadas hoje',
-        dica: PHOJE.carregando && !PHOJE.em ? 'lendo as tarefas de hoje\u2026' : 'espelho: todas as propostas apresentadas ao cliente hoje \u00b7 o card mostra onde est\u00e1 agora' });
+      c.splice(i >= 0 ? i + 1 : 0, 0, { id: 'prop_hoje', name: 'Propostas feitas hoje',
+        dica: PHOJE.carregando && !PHOJE.em ? 'lendo as tarefas de hoje\u2026' : 'espelho: negocia\u00e7\u00f5es em que a proposta foi feita hoje (Negociar Compra ou nova proposta finalizada) \u00b7 o card mostra onde est\u00e1 agora' });
       return c;
     };
     return L;
@@ -3365,7 +3367,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var tipoA = infJ.tipo || fJ.tipo || '';
     if (tipoA) cab.appendChild(el('span', 'lcbk-jur-tag is-tipo', /rpv/i.test(tipoA) ? 'RPV' : 'Precat\u00f3rio'));
     var fdJ = it.tipo === 'filho' ? fundoDe(it) : '';
-    cab.appendChild(el('span', 'lcbk-jur-tag is-fundo', fdJ ? 'Fundo ' + fdJ : 'Fundo n\u00e3o informado'));
+    // "n\u00e3o lido" = o Kanban n\u00e3o conseguiu ler o formul\u00e1rio desta negocia\u00e7\u00e3o (permiss\u00e3o); "n\u00e3o informado" = leu e est\u00e1 vazio
+    var semForm = !FORM.porSol[it.num] && !infJ.fundoR;
+    var tagF = el('span', 'lcbk-jur-tag is-fundo' + (semForm && !fdJ ? ' is-semform' : ''), fdJ ? 'Fundo ' + fdJ : semForm ? 'Fundo n\u00e3o lido' : 'Fundo n\u00e3o informado');
+    if (semForm && !fdJ) tagF.title = 'O formul\u00e1rio desta negocia\u00e7\u00e3o n\u00e3o p\u00f4de ser lido com o seu usu\u00e1rio (permiss\u00e3o do fluxo). Inclua o "Fundo Respons\u00e1vel" no resumo da solicita\u00e7\u00e3o ou ajuste a permiss\u00e3o.';
+    cab.appendChild(tagF);
     var prioJ = fJ.prioridade || infJ.prio;
     if (prioJ) {
       var pr = semAcentoMin(prioJ), clsP = /maxim/.test(pr) ? 'is-max' : /complic/.test(pr) ? 'is-compl' : /urgent/.test(pr) ? 'is-urg' : 'is-normal';
@@ -3427,7 +3433,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       tags.appendChild(el('span', 'lcbk-chip is-ativo', fdC ? 'Fundo ' + fdC : 'Fundo n\u00e3o informado'));
     }
     if (it._col && it._col.id === 'prop_hoje' && PHOJE.sols[it.num]) {
-      tags.appendChild(el('span', 'lcbk-chip is-tent', 'Enviada hoje ' + PHOJE.sols[it.num].toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })));
+      var ph = PHOJE.sols[it.num];
+      var chP = el('span', 'lcbk-chip is-tent', 'Proposta feita hoje ' + ph.hora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + (ph.n > 1 ? ' (' + ph.n + 'x)' : ''));
+      chP.title = 'Tarefa finalizada: ' + ph.tarefa;
+      tags.appendChild(chP);
     }
     if (it.ativo && it.area && it._col && it._col.outras) {
       tags.appendChild(el('span', 'lcbk-chip is-area', CFG.nomesArea[it.area] || it.area));
@@ -3962,6 +3971,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   var FINFORM = { chave: '', carregando: false, em: null, erro: '' };
   // Propostas enviadas hoje: negocia\u00e7\u00f5es com a tarefa "Apresentar Proposta\u2026" recebida ou finalizada hoje (log do Zeev)
   var PHOJE = { chave: '', carregando: false, em: null, sols: {} };
+  // tarefas em que o vendedor/diretoria FAZ a proposta (ao finalizar, a proposta foi feita)
+  var RE_FAZ_PROPOSTA = /negociar compra|gerar .*proposta|nova proposta|segunda proposta|proposta corrigida|proposta diretor financeiro/;
   function carregarPropostasHoje() {
     if (PHOJE.carregando || !LC.base) return;
     var hoje = new Date(); hoje.setHours(0, 0, 0, 0);
@@ -3975,11 +3986,14 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var est = { consultas: 0, incompleto: 0, taskStatus: 'S' }, i = 0;
     (function prox() {
       if (i >= fila.length) {
-        var sols = {};
+        var sols = {}, vistoInst = {};
         acc.forEach(function (x) {
-          if (!x.sol || !/apresentar proposta/.test(nomeTarefa(x.nome))) return;
-          var d = x.rec && x.rec >= hoje && x.rec < amanha ? x.rec : x.fin && x.fin >= hoje && x.fin < amanha ? x.fin : null;
-          if (d && (!sols[x.sol] || d > sols[x.sol])) sols[x.sol] = d;
+          var nm = nomeTarefa(x.nome);
+          if (!x.sol || !RE_FAZ_PROPOSTA.test(nm)) return;
+          if (!(x.fin && x.fin >= hoje && x.fin < amanha)) return;       // finalizada hoje = proposta feita
+          if (vistoInst[x.inst]) return; vistoInst[x.inst] = 1;
+          var r = sols[x.sol] || (sols[x.sol] = { hora: x.fin, n: 0, tarefa: x.nome });
+          r.n++; if (x.fin > r.hora) { r.hora = x.fin; r.tarefa = x.nome; }
         });
         PHOJE.sols = sols; PHOJE.em = new Date(); PHOJE.carregando = false; acc = null;
         buscarPropostasFora();
@@ -5173,6 +5187,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var jaPH = {};
       lidos.concat(PHOJE.extra ? Object.keys(PHOJE.extra).map(function (k) { return PHOJE.extra[k]; }) : []).forEach(function (it) {
         if (!it || it.tipo !== 'filho' || !PHOJE.sols[it.num] || jaPH[it.num]) return;
+        var fPH = FORM.porSol[it.num];
+        if (fPH && !fPH.prop && !(fPH.partes && ['autor', 'contratual', 'sucumbencial'].some(function (k) { return fPH.partes[k] && fPH.partes[k].pp; }))) return;   // sem proposta preenchida
         jaPH[it.num] = 1;
         if (!it._enr) { it._enr = 1; if (it.atividade) { var clP = classificar(it.tipo, it.atividade); it.stage = clP.etapa; it.area = clP.area; } enriquecer(it); }
         buckets.prop_hoje.push(it);
