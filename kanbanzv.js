@@ -530,7 +530,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-24b';
+  var VERSAO = '2026-11-25b';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -1352,6 +1352,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       c.appendChild(el('div', 'lcbk-title', nomeCli || it.titulo));
       if (it.processo) c.appendChild(el('div', 'lcbk-app', nomeAplicativoJur(it.processo)));
       if (nomeCli && it.titulo !== nomeCli) c.appendChild(el('div', 'lcbk-app lcbk-atv', it.titulo));
+      extrasT22(c, it);
       blocoInfo(c, it.info, false, null, true);
     } else {
     c.appendChild(el('div', 'lcbk-title', it.titulo));
@@ -1909,6 +1910,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       '.lcbk-col[data-col="administrativo"],.lcbk-col[data-col="st_admin"]{--lcbk-cor:#004065}',
       '.lcbk-area{font-weight:600;color:#003050;min-width:170px}',
       '.lcbk-jur-cab{display:flex;flex-wrap:wrap;gap:5px;margin:2px 0 6px}',
+      'select.lcbk-select.is-on{border-color:#003050;box-shadow:inset 0 0 0 1px #003050;font-weight:600}',
+      '.lcbk-info.lcbk-t22{background:#EEF0FF;border-color:#DDE1FF;margin-top:6px}',
       '.lcbk-jur-tag{font-family:"Karla","Lato",system-ui,sans-serif;font-weight:700;font-size:11.5px;border-radius:6px;padding:2px 8px}',
       '.lcbk-jur-tag.is-tipo{background:#003050;color:#fff}',
       '.lcbk-jur-tag.is-fundo{background:#EEF0FF;color:#030094}',
@@ -2133,6 +2136,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       if (!info.fundoR && /^fundo( respons[a\u00e1]vel)?\b/.test(r)) { info.fundoR = v; return; }
       if (!info.prio && /^prioridade/.test(r)) { info.prio = v; return; }
       if (info.tentTxt == null && /tentativa/.test(r)) { info.tentTxt = clean(p.valor); return; }
+      if (!info.nPropR && /^n[u\u00fa]mero da proposta/.test(r)) { var mNP = String(p.valor).match(/\d{3,}/); if (mNP) info.nPropR = mNP[0]; return; }
       if (/n[u\u00fa]mero/.test(r)) return;                       // "n\u00famero da proposta" n\u00e3o \u00e9 valor
       for (var i = 0; i < R.propostas.length; i++) {
         if (R.propostas[i][0].test(r) && /\d/.test(v)) { props.push({ ordem: i, valor: moeda(v), rotulo: R.propostas[i][1] }); break; }
@@ -3382,6 +3386,54 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     }
     c.appendChild(cab);
   }
+  // T22-Validar assinatura: n\u00ba da proposta e tipo de cliente (autor ou advogado), al\u00e9m do fundo
+  function extrasT22(c, it) {
+    if (it.tipo !== 'filho' || !/validar assinatura/.test(nomeTarefa(it.atividade || it.titulo))) return;
+    var f = FORM.porSol[it.num] || {}, inf = it.info || {};
+    var nP = f.nProp || (f.props && f.props[0]) || inf.nProp || inf.nPropR || '';
+    var t = semAcentoMin(it.processo || ''), cli = /contratual/.test(t) ? 'Advogado (contratual)' : /sucumb/.test(t) ? 'Advogado (sucumbencial)' : /autor/.test(t) ? 'Autor' : '';
+    var g = el('dl', 'lcbk-info lcbk-t22');
+    g.appendChild(el('dt', null, 'N\u00ba da proposta')); g.appendChild(el('dd', nP ? 'is-valor' : 'is-vazio', nP || (FORM.porSol[it.num] ? 'n\u00e3o informado' : 'n\u00e3o lido')));
+    g.appendChild(el('dt', null, 'Tipo de cliente')); g.appendChild(el('dd', cli ? 'is-face' : 'is-vazio', cli || 'n\u00e3o identificado'));
+    c.appendChild(g);
+  }
+  // Tipo de ativo (RPV, Precat\u00f3rio 2027, Pr\u00e9 Precat\u00f3rio\u2026): do formul\u00e1rio ou do resumo
+  function categoriaAtivo(it) {
+    var f = FORM.porSol[it.num] || {}, t = (it.info && it.info.tipo) || f.tipo || '';
+    var n = semAcentoMin(t);
+    if (!n) return 'Sem tipo informado';
+    if (/rpv/.test(n)) return 'RPV';
+    if (/pre[\s-]*precat/.test(n)) return 'Pr\u00e9 Precat\u00f3rio';
+    if (/estrat/.test(n)) return 'Estrat\u00e9gico';
+    var m = n.match(/20\d{2}/);
+    if (/precat/.test(n)) return m ? 'Precat\u00f3rio ' + m[0] : 'Precat\u00f3rio';
+    return clean(t);
+  }
+  function combinaAtivo(it, v) {
+    var c = categoriaAtivo(it);
+    return v === 'PRC*' ? /^Precat\u00f3rio/.test(c) : c === v;
+  }
+  function montarFiltroAtivo(lista) {
+    if (!uiI.fAtivo) return;
+    var cont = {};
+    lista.forEach(function (it) { var c = categoriaAtivo(it); cont[c] = (cont[c] || 0) + 1; });
+    var ordem = function (c) { return c === 'RPV' ? 0 : c === 'Pr\u00e9 Precat\u00f3rio' ? 1 : /^Precat\u00f3rio/.test(c) ? 2 : c === 'Estrat\u00e9gico' ? 3 : c === 'Sem tipo informado' ? 9 : 5; };
+    var cats = Object.keys(cont).sort(function (a, b) { return ordem(a) - ordem(b) || a.localeCompare(b); });
+    var nPrc = cats.filter(function (c) { return /^Precat\u00f3rio/.test(c); }).reduce(function (a, c) { return a + cont[c]; }, 0);
+    var ops = [['', 'Ativo: todos']];
+    cats.forEach(function (c) {
+      if (/^Precat\u00f3rio/.test(c) && !ops.some(function (o) { return o[0] === 'PRC*'; })) ops.push(['PRC*', 'Precat\u00f3rio (todos) (' + fmtN(nPrc) + ')']);
+      ops.push([c, c + ' (' + fmtN(cont[c]) + ')']);
+    });
+    if (stInst.ativo && !ops.some(function (o) { return o[0] === stInst.ativo; })) ops.push([stInst.ativo, stInst.ativo + ' (0)']);
+    var chave = ops.map(function (o) { return o.join('='); }).join('|');
+    if (uiI.fAtivo._chave !== chave) {
+      uiI.fAtivo._chave = chave; uiI.fAtivo.replaceChildren();
+      ops.forEach(function (o) { var op = el('option', null, o[1]); op.value = o[0]; uiI.fAtivo.appendChild(op); });
+    }
+    uiI.fAtivo.value = stInst.ativo;
+    uiI.fAtivo.classList.toggle('is-on', !!stInst.ativo);
+  }
   function nomeAplicativoJur(p) {
     var t = semAcentoMin(p);
     if (/contratual/.test(t)) return 'Honor\u00e1rios Contratuais';
@@ -3416,6 +3468,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (it.processo) c.appendChild(el('div', 'lcbk-app', jur ? nomeAplicativoJur(it.processo) : it.processo));
     else if (jur && it.titulo && /negocia/i.test(it.titulo)) { /* sem nome no resumo: o t\u00edtulo j\u00e1 \u00e9 o aplicativo */ }
     if (it.atividade) c.appendChild(el('div', 'lcbk-app lcbk-atv', it.atividade));
+    if (jur) extrasT22(c, it);
     blocoInfo(c, it.info, false, it._col && it._col.id, jur);
     var tags = el('div', 'lcbk-tags');
     tags.appendChild(el('span', 'lcbk-tipo is-' + it.tipo, NOME_TIPO[it.tipo] || NOME_TIPO.pai));
@@ -3467,6 +3520,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     etapa: '',
     vend: '',
     relStatus: ls('lcbKanbanRelStatus') || '',
+    ativo: ls('lcbKanbanAtivo') || '',
     periodo: ls('lcbKanbanPeriodo') || '',
     comigo: false,
     lim: {},
@@ -5091,9 +5145,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     }
     if (stInst.comigo && MEU.nums) lidos = lidos.filter(function (it) { return MEU.nums[it.num]; });
     var ehFundo = /^fundo/.test(layoutId);
+    montarFiltroAtivo(lidos.filter(function (it) { return !L.esteira || L.place(it) !== 'outros'; }));
     var semRecorte = !ehFundo && (buscando || stInst.comigo);         // busca e "Comigo" ignoram esteira/time/pessoa (exceto nos fundos)
     var todos = lidos.filter(function (it) {
       if (semRecorte) return true;
+      if (stInst.ativo && !combinaAtivo(it, stInst.ativo)) return false;   // filtro de tipo de ativo
       if (layoutId === 'relrd' && stInst.relStatus && it.tipo === 'relacionamento' && statusRel(it) !== stInst.relStatus) return false;
       if (L.esteira && (!stInst.outras || ehFundo) && L.place(it) === 'outros') { foraDaArea++; return false; }
       if (stInst.time && timeDe(it) !== stInst.time && !(timeDe(it) === 'filho' && stInst.time !== 'triagem')) {
@@ -5436,6 +5492,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         return pagas.length ? ' | pagos do financeiro: ' + n + ' de ' + pagas.length + ' achados no Zeev' +
           (n < pagas.length ? ' (faltam: ' + pagas.filter(function (x) { return !achadas[x]; }).join(', ') + ')' : '') : '';
       })() : '') +
+      (stInst.ativo ? ' | ativo: ' + (stInst.ativo === 'PRC*' ? 'Precat\u00f3rio (todos)' : stInst.ativo) : '') +
       (usandoFixo() ? ' | filtro fixo ativo' : '') +
       (stInst.comigo ? ' | s\u00f3 comigo' + (MEU.erro ? ' (n\u00e3o foi poss\u00edvel ler suas tarefas)' : '') : '') + ' | Kanban ' + VERSAO +
       (ocultos ? ' | ' + ocultos + ' oculto(s) pela busca' : '');
@@ -5530,6 +5587,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       renderInst();
     });
     uiI.tools.appendChild(uiI.fPeriodo);
+    uiI.fAtivo = el('select', 'lcbk-select');
+    uiI.fAtivo.setAttribute('aria-label', 'Tipo de ativo');
+    uiI.fAtivo.addEventListener('change', function () { stInst.ativo = uiI.fAtivo.value; ls('lcbKanbanAtivo', stInst.ativo); renderInst(); });
+    uiI.tools.appendChild(uiI.fAtivo);
     uiI.fAtor = el('select', 'lcbk-select');
     uiI.fAtor.setAttribute('aria-label', 'Filtrar por quem est\u00e1 com a atividade');
     uiI.fAtor.addEventListener('change', function () { stInst.ator = uiI.fAtor.value; renderInst(); });
