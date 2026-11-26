@@ -556,7 +556,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-27k';
+  var VERSAO = '2026-11-27l';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -2665,6 +2665,15 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   // Controladoria, SEM mudar nenhuma regra \u2014 as mesmas fun\u00e7\u00f5es de sempre decidem onde o card cai.
   // Fechados (PAGO) usa a regra \u00fanica (ehPago), ent\u00e3o d\u00e1 o MESMO n\u00famero das outras telas.
   // Cess\u00e3o e Auditoria s\u00e3o espelhos: o card aparece l\u00e1 e continua contando em Fechados (PAGO).
+  // Proposta Aceita da Vis\u00e3o Executiva: a MESMA conta do Pipeline Comercial, passo a passo,
+  // para os dois n\u00fameros nunca divergirem (em formaliza\u00e7\u00e3o, fora pago, cess\u00e3o, gestora e pend\u00eancias
+  // do comercial). Em que etapa do jur\u00eddico o card est\u00e1, as outras colunas mostram.
+  function ehPropostaAceita(it) {
+    if (!it.ativo || it.tipo !== 'filho' || semCompraFin(it) || ehPago(it)) return false;
+    if (it.stage === 'cessao' || it.stage === 'solgestora' || /^gestora/.test(it.stage)) return false;
+    if (colunaDe('comercial', it) === 'pendencias') return false;
+    return posAceite(it);
+  }
   function layoutExecutivo() {
     function montarColunas() {
       return [
@@ -2735,10 +2744,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       // espelhos: o card continua na coluna principal e aparece TAMB\u00c9M nestas
       espelho: function (it) {
         if (!it.ativo || it.tipo !== 'filho') return '';
-        var esp = [], col = colocar(it), nm = nomeTarefa(it.atividade);
-        // Proposta Aceita: a mesma conta do Pipeline Comercial (em formaliza\u00e7\u00e3o, fora as pend\u00eancias).
-        // S\u00e3o os mesmos cards que a Vis\u00e3o Executiva detalha em An\u00e1lise Jur\u00eddica e Contrato & Assinatura.
-        if (posAceite(it) && ['analise', 'contrato'].indexOf(col) !== -1) esp.push('fecCom');
+        var esp = [], nm = nomeTarefa(it.atividade);
+        if (ehPropostaAceita(it)) esp.push('fecCom');
         if (/auditar pagamento/.test(nm)) esp.push('auditoria');
         else if (/finalizacao da compra/.test(nm)) esp.push('cessaoComp');
         return esp;
