@@ -110,7 +110,20 @@
       // Uma negocia\u00e7\u00e3o com uma dessas propostas vai para Fechados (PAGO), em qualquer etapa.
       // Valor pago informado pelo financeiro (n\u00ba da SOLICITA\u00c7\u00c3O \u2192 valor). Vale acima de qualquer regra.
       // Use para corrigir opera\u00e7\u00f5es em que o valor negociado n\u00e3o est\u00e1 no formul\u00e1rio.
-      valoresPagos: { '28160': 197907, '28290': 46271, '28941': 28923, '28751': 24500 },
+      // (planilha "Propostas com valor pago divergente", conferida pelo financeiro em 25/11/2026)
+      valoresPagos: {
+        '26482': 6079, '26725': 12500, '26733': 7916, '26761': 3381, '26768': 1025, '27061': 5597, '27190': 37563,
+        '27201': 34297, '27209': 31931, '27218': 13633, '27237': 61300, '27397': 109000, '27408': 3174, '27746': 2841,
+        '27814': 37221, '27890': 6453, '27919': 2390, '27927': 45615, '27941': 19438, '28092': 48144, '28101': 5548,
+        '28142': 4458, '28156': 1263, '28160': 197907, '28167': 4473, '28171': 899, '28195': 5067, '28200': 8845,
+        '28226': 1042, '28233': 8959, '28290': 46271, '28432': 3971, '28443': 3381, '28460': 2757, '28751': 24500,
+        '28800': 7292, '28832': 18979, '28853': 4609, '28866': 1154, '28872': 7025, '28884': 1813, '28941': 28923,
+        '28952': 3507, '29108': 7224, '29117': 4349, '29137': 3073, '29619': 29820, '29670': 23300, '29679': 6474,
+        '29682': 9952, '29726': 2230, '29729': 24121, '29730': 3236, '29744': 2506, '29746': 9334, '29766': 2359,
+        '29790': 2819, '29876': 5600, '29901': 11286, '29912': 2193, '29917': 6636, '29963': 1449, '29985': 50575,
+        '29997': 7742, '30013': 39653, '30023': 35000, '30138': 19436, '30155': 62000, '30202': 24597, '30213': 3070,
+        '30233': 5525, '30237': 4503, '30313': 4498, '30353': 7542, '30934': 24285, '30976': 4025
+      },
       propostasPagas: ['1863', '1864', '1865', '1866', '1867', '1870', '1873', '1874', '1875',
                        '3717', '3752', '3787', '3791', '3795'],
       // PPP com o vendedor: campo "Tentativas de contato" (no resumo do Zeev). 0 = Novo; 1 a 4 = Tentativa de
@@ -530,7 +543,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-25b';
+  var VERSAO = '2026-11-26a';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -4666,11 +4679,22 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   function enriquecer(it) {
     var f = FORM.porSol[it.num];
-    if (!f) return;
+    if (!f) {
+      var vPL = (CFG.producao.valoresPagos || {})[it.num];         // pago informado pelo financeiro, mesmo sem formul\u00e1rio lido
+      if (vPL) { var inf0 = it.info || (it.info = {}); inf0.propN = vPL; inf0.proposta = moedaBR(vPL); inf0.propostaRot = 'valor pago pelo fundo'; inf0.valorPagoFundo = true; }
+      return;
+    }
     var inf = it.info || (it.info = {});
     if (f.face) { inf.faceN = f.face; inf.face = moedaBR(f.face); inf.faceRot = f.faceRot || ''; }
     if (f.prop) { inf.propN = f.prop; inf.proposta = moedaBR(f.prop); inf.propostaRot = f.propRot; }
     else if (f.face) { inf.semProposta = true; }
+    var vPago = f.vPagoFundo || (CFG.producao.valoresPagos || {})[it.num];
+    if (vPago) {                                                  // valor efetivamente pago pelo fundo
+      inf.propN = vPago; inf.proposta = moedaBR(vPago); inf.propostaRot = 'valor pago pelo fundo'; inf.semProposta = false; inf.valorPagoFundo = true;
+    } else if (f.partes) {                                        // proposta aprovada, sem a "2\u00aa proposta" autom\u00e1tica (\u2248 face)
+      var vr = valoresFundoRegra(it.num, {}, f);
+      if (vr.pago && (!inf.propN || inf.propN >= (vr.face || inf.faceN || 0) * 0.95)) { inf.propN = vr.pago; inf.proposta = moedaBR(vr.pago); }
+    }
     if (f.face && f.prop) inf.desagio = Math.max(0, 1 - f.prop / f.face);
     if (f.tipo && !inf.tipo) inf.tipo = f.tipo;
     inf.nProp = f.nProp; inf.fundo = f.fundo;
