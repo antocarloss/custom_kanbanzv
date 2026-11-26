@@ -196,7 +196,7 @@
       maxItens: 25000,       // teto absoluto por carga
       tamanhoPagina: 500,    // pede p\u00e1ginas grandes; se o Zeev limitar, o script se ajusta
       cardsPorColuna: 100,   // desenha at\u00e9 isso por coluna ("Mostrar mais" para o resto); contagens s\u00e3o do total
-      paralelo: 4,           // p\u00e1ginas lidas ao mesmo tempo na carga completa
+      paralelo: 8,           // p\u00e1ginas lidas ao mesmo tempo na carga completa
       cacheHoras: 12,        // validade da c\u00f3pia local criptografada da lista
       funilAcima: 3000,      // esteira comercial/jur\u00eddica numa lista maior que isso, sem filtro de fluxo: carrega s\u00f3 o funil
       atualizarMin: 2,       // rel\u00ea a lista completa sozinho a cada X min (aba vis\u00edvel), sem piscar a tela
@@ -556,7 +556,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-27e';
+  var VERSAO = '2026-11-27h';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -3212,13 +3212,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       });
     }
     progresso();
-    var i = 0;
-    (function prox() {
-      if (acabou) return;
-      if (mudou()) { LC.cancelar = true; return fim(''); }
-      if (i >= fontes.length) return fim('');
-      lerFonte(fontes[i++]).then(prox, function (e) { fim('n\u00e3o foi poss\u00edvel carregar o funil (' + (e && e.message) + ')'); });
-    })();
+    // as fontes do funil v\u00e3o em paralelo (antes era uma depois da outra: era o que mais demorava)
+    Promise.all(fontes.map(function (h) { return lerFonte(h); }))
+      .then(function () { if (!acabou) { if (mudou()) LC.cancelar = true; fim(''); } },
+            function (e) { fim('n\u00e3o foi poss\u00edvel carregar o funil (' + (e && e.message) + ')'); });
   }
 
   var tAuto;
@@ -3721,7 +3718,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     return parseFloat(v.replace(/[.,]/g, '')) || 0;
   }
   function moedaBR(n) { return 'R$ ' + Math.round(n).toLocaleString('pt-BR'); }
-  var FORM = { porSol: {}, carregando: false, erro: '', em: null, base: '', incompleto: 0 };
+  var FORM = { porSol: {}, carregando: false, erro: '', em: null, base: '', incompleto: 0, feitas: 0 };
   var FORM_VERSAO = 13;                                         // muda quando a leitura do formul\u00e1rio ganha campos novos
   function lerFormCsv(txt, por) {
     var linhas = lerCsv(txt);
@@ -3909,24 +3906,66 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     });
     return linhas.length - 1;
   }
+  // Janela de datas a ler: da negocia\u00e7\u00e3o mais antiga carregada at\u00e9 hoje (m\u00e1ximo de 3 anos).
+  function janelaFormularios() {
+    var min = null, itens = (LC.completo && LC.completo.itens) || [];
+    itens.forEach(function (it) { if (it.inicioEm && (!min || it.inicioEm < min)) min = it.inicioEm; });
+    var lim = new Date(Date.now() - 3 * 365 * DIA);
+    if (!min || min < lim) min = lim;
+    return new Date(min.getTime() - DIA);
+  }
+  // L\u00ea o export de um fluxo num intervalo. O Zeev corta em 1.000 linhas: s\u00f3 quando bate no
+  // corte \u00e9 que divide o intervalo ao meio \u2014 nos outros casos \u00e9 uma consulta s\u00f3.
+  function lerFormExport(f, ini, fim, por, prof) {
+    var u = new URL(LC.base || baseDe(LC.url));
+    u.pathname = u.pathname.replace(/\/instances\/?$/, '/instances/export/requests/csvsemicolon');
+    ['pagenumber', 'recordsperpage', 'keyword', 'startBegin', 'startEnd', 'endBegin', 'endEnd'].forEach(function (k) { u.searchParams.delete(k); });
+    u.searchParams.set('codFlowsOrServices', f[0] + ';' + f[1] + ';0;0');
+    u.searchParams.set('startBegin', ddmmaaaa(ini)); u.searchParams.set('startEnd', ddmmaaaa(fim));
+    return getJson(nossa(u.href)).then(function (j) {
+      var n = lerFormCsv(decodificar(j && j.success && j.success.fileContent), por);
+      FORM.feitas++;
+      if (n < CFG.producao.limiteLinhas) return;
+      var dias = Math.round((fim - ini) / DIA);
+      if (dias < 1 || (prof || 0) >= 6) { FORM.incompleto++; return; }
+      var meio = new Date(ini.getTime() + Math.floor(dias / 2) * DIA), dep = new Date(meio.getTime() + DIA);
+      // as duas metades em paralelo: mais r\u00e1pido que uma depois da outra
+      return Promise.all([lerFormExport(f, ini, meio, por, (prof || 0) + 1),
+                          lerFormExport(f, dep, fim, por, (prof || 0) + 1)]);
+    });
+  }
+  // Roda as consultas em paralelo, com um limite de quantas ao mesmo tempo (n\u00e3o afoga o Zeev).
+  function emParalelo(tarefas, quantas) {
+    var i = 0;
+    function trilha() {
+      if (i >= tarefas.length) return Promise.resolve();
+      return tarefas[i++]().then(trilha, trilha);
+    }
+    var t = []; for (var k = 0; k < Math.min(quantas, tarefas.length || 1); k++) t.push(trilha());
+    return Promise.all(t);
+  }
   function carregarFormularios() {
     if (FORM.carregando || !LC.url) return;
-    FORM.carregando = true; FORM.erro = ''; FORM.incompleto = 0;
+    FORM.carregando = true; FORM.erro = ''; FORM.incompleto = 0; FORM.feitas = 0;
     var base = LC.base || baseDe(LC.url), por = {};
     var filhos = fluxosNegociacao();
-    var i = 0;
-    function prox() {
-      if (i >= filhos.length) return Promise.resolve();
-      var f = filhos[i++], u = new URL(base);
-      u.pathname = u.pathname.replace(/\/instances\/?$/, '/instances/export/requests/csvsemicolon');
-      ['pagenumber', 'recordsperpage', 'keyword'].forEach(function (k) { u.searchParams.delete(k); });
-      u.searchParams.set('codFlowsOrServices', f[0] + ';' + f[1] + ';0;0');
-      return esperarLista().then(function () { return getJson(nossa(u.href)); }).then(function (j) {
-        var n = lerFormCsv(decodificar(j && j.success && j.success.fileContent), por);
-        if (n >= CFG.producao.limiteLinhas) FORM.incompleto++;
-      }).then(prox);
+    var iniJ = janelaFormularios(), fimJ = new Date(Date.now() + DIA);
+    // Quantos peda\u00e7os j\u00e1 na primeira rodada: estimado pelo tamanho da lista carregada, para n\u00e3o
+    // gastar uma consulta inteira s\u00f3 para descobrir que bateu no corte.
+    var nLista = ((LC.completo && LC.completo.itens) || []).length;
+    var peds = Math.max(1, Math.min(16, Math.ceil(nLista / (CFG.producao.limiteLinhas * 0.7))));
+    var totDias = Math.max(1, Math.round((fimJ - iniJ) / DIA)), passo = Math.ceil(totDias / peds);
+    var faixas = [];
+    for (var d = 0; d < totDias; d += passo) {
+      var a = new Date(iniJ.getTime() + d * DIA);
+      var b = new Date(Math.min(fimJ.getTime(), iniJ.getTime() + (d + passo - 1) * DIA));
+      faixas.push([a, b]);
     }
-    prox().then(function () {
+    var tarefas = [];
+    filhos.forEach(function (f) {
+      faixas.forEach(function (fx) { tarefas.push(function () { return lerFormExport(f, fx[0], fx[1], por, 0); }); });
+    });
+    esperarLista().then(function () { return emParalelo(tarefas, 6); }).then(function () {
       if (FORM.base === base) Object.keys(por).forEach(function (k) { FORM.porSol[k] = por[k]; });   // junta: n\u00e3o apaga o que o financeiro leu
       else FORM.porSol = por;
       FORM.em = new Date(); FORM.base = base; setTimeout(salvarCache, 0);
@@ -4097,9 +4136,16 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   // Como est\u00e1 a leitura das pagas: a coluna s\u00f3 fica completa quando terminar a busca das
   // negocia\u00e7\u00f5es pagas no per\u00edodo mas abertas em outro m\u00eas (uma consulta por n\u00famero).
+  // A coluna de pago s\u00f3 pode ser lida quando a lista, os valores dos formul\u00e1rios e a busca
+  // das pagas de outros meses terminaram. Antes disso, o n\u00famero e as somas s\u00e3o parciais.
+  function pagosParcial() {
+    return !listaPronta() || LC.carregando || FORM.carregando || FORMP.carregando || PAGOPER.carregando || PAGOPER.pend > 0;
+  }
   function statusPagos() {
-    if (PAGOPER.carregando) return ' \u00b7 lendo as datas de pagamento\u2026';
-    if (PAGOPER.pend > 0) return ' \u00b7 buscando ' + PAGOPER.pend + ' paga(s) de outros meses\u2026 (o n\u00famero ainda vai subir)';
+    if (!listaPronta() || LC.carregando) return ' \u00b7 N\u00daMERO PARCIAL: ainda carregando as negocia\u00e7\u00f5es\u2026';
+    if (FORM.carregando || FORMP.carregando) return ' \u00b7 N\u00daMERO PARCIAL: ainda lendo os valores dos formul\u00e1rios\u2026';
+    if (PAGOPER.carregando) return ' \u00b7 N\u00daMERO PARCIAL: lendo as datas de pagamento\u2026';
+    if (PAGOPER.pend > 0) return ' \u00b7 N\u00daMERO PARCIAL: buscando ' + PAGOPER.pend + ' paga(s) de outros meses\u2026';
     if (PAGOPER.naoAchadas.length) return ' \u00b7 ' + PAGOPER.naoAchadas.length + ' paga(s) n\u00e3o encontrada(s) no Zeev com a sua permiss\u00e3o: ' + PAGOPER.naoAchadas.slice(0, 12).join(', ');
     return '';
   }
@@ -4154,21 +4200,22 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     }).slice(0, 300);
     PAGOPER.pend = faltam.length; PAGOPER.naoAchadas = [];
     if (!faltam.length || !LC.base) { renderInst(); return; }
-    var i = 0;
-    (function prox() {
-      if (i >= faltam.length) { PAGOPER.pend = 0; return renderInst(); }
-      var sol = faltam[i++], u = new URL(LC.base);
-      ['codFlowsOrServices', 'flowStatus', 'startBegin', 'startEnd', 'endBegin', 'endEnd'].forEach(function (k) { u.searchParams.delete(k); });
-      u.searchParams.set('keyword', sol); u.searchParams.set('pagenumber', '1'); u.searchParams.set('recordsperpage', '10');
-      getJson(nossa(u.href)).then(function (j) {
-        ((j && j.success && j.success.itens) || []).forEach(function (x) { var it = daApi(x); if (it.num === sol) PAGOPER.extra[sol] = it; });
-        if (!PAGOPER.extra[sol]) PAGOPER.naoAchadas.push(sol);
-      }).catch(function () { PAGOPER.naoAchadas.push(sol); }).then(function () {
-        PAGOPER.pend = faltam.length - i;
-        if (i % 10 === 0) renderInst();
-        setTimeout(prox, 120);
-      });
-    })();
+    var feitas = 0;
+    var tarefas = faltam.map(function (sol) {
+      return function () {
+        var u = new URL(LC.base);
+        ['codFlowsOrServices', 'flowStatus', 'startBegin', 'startEnd', 'endBegin', 'endEnd'].forEach(function (k) { u.searchParams.delete(k); });
+        u.searchParams.set('keyword', sol); u.searchParams.set('pagenumber', '1'); u.searchParams.set('recordsperpage', '10');
+        return getJson(nossa(u.href)).then(function (j) {
+          ((j && j.success && j.success.itens) || []).forEach(function (x) { var it = daApi(x); if (it.num === sol) PAGOPER.extra[sol] = it; });
+          if (!PAGOPER.extra[sol]) PAGOPER.naoAchadas.push(sol);
+        }).catch(function () { PAGOPER.naoAchadas.push(sol); }).then(function () {
+          PAGOPER.pend = faltam.length - (++feitas);
+          if (feitas % 10 === 0) renderInst();
+        });
+      };
+    });
+    emParalelo(tarefas, 6).then(function () { PAGOPER.pend = 0; renderInst(); });
   }
   // Propostas enviadas hoje: negocia\u00e7\u00f5es com a tarefa "Apresentar Proposta\u2026" recebida ou finalizada hoje (log do Zeev)
   var PHOJE = { chave: '', carregando: false, em: null, sols: {} };
@@ -5476,7 +5523,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         if (somaProp || somaFace) h.appendChild(somaEl(' is-prop', 'Valor de Desembolso', moedaBR(somaProp)));
       }
       head.appendChild(h);
-      head.appendChild(el('span', 'lcbk-count', fmtN(n)));
+      var parcPG = periodoPorPagamento() && ['fechados', 'pos', 'st_pago'].indexOf(c.id) !== -1 && pagosParcial();
+      var cEl = el('span', 'lcbk-count', fmtN(n) + (parcPG ? '\u2026' : ''));
+      if (parcPG) { cEl.style.opacity = '.45'; cEl.title = 'N\u00famero parcial: o Kanban ainda est\u00e1 carregando. Espere o aviso sumir antes de usar este valor.'; }
+      head.appendChild(cEl);
+      if (parcPG) { h.style.opacity = '.6'; }
       var nAtr = 0, nHoje = 0, nFila = 0;
       list.forEach(function (it) { if (it.ativo) { if (it.late) nAtr++; else if (it.today) nHoje++; if (it.fila) nFila++; } });
       if (nAtr || nHoje || nFila) {
