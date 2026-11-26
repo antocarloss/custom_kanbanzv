@@ -543,7 +543,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-27a';
+  var VERSAO = '2026-11-27b';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -2506,7 +2506,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
           .concat([
                    { id: 'cessao', name: 'Proposta assinada pelo cliente', dica: 'T23 em andamento' },
                    { id: 'fechados', name: 'Fechados (PAGO)', ok: true, encerrada: true,
-                     dica: periodoPorPagamento() ? 'por data do pagamento (T31) \u00b7 ' + nomePeriodo(periodoEfetivo()).replace(/^Abertas /, 'pagas ') +
+                     dica: periodoPorPagamento() ? 'por data do pagamento (T31) \u00b7 ' + nomePagos() +
                        (PAGOPER.carregando ? ' \u00b7 lendo as datas de pagamento\u2026' : '')
                        : 'chegou na T30 (finaliza\u00e7\u00e3o da compra), T31 ou depois, ou conclu\u00edda' },
                    { id: 'perdJur', name: 'Perdidas \u00b7 rejeitada pelo jur\u00eddico', alert: true, dica: 'passou pela reprova\u00e7\u00e3o (T11, T15 ou T16)', encerrada: true },
@@ -3541,6 +3541,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     vend: '',
     relStatus: ls('lcbKanbanRelStatus') || '',
     ativo: ls('lcbKanbanAtivo') || '',
+    pagoPer: ls('lcbKanbanPagoPer') || '',          // filtro "Pagos" da coluna Fechados (PAGO): '' = segue o per\u00edodo
     periodo: ls('lcbKanbanPeriodo') || '',
     comigo: false,
     lim: {},
@@ -4049,9 +4050,17 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   // Data do pagamento = conclus\u00e3o da T31-Auditar Pagamento; sen\u00e3o conclus\u00e3o da T30-Acompanhar Finaliza\u00e7\u00e3o da Compra;
   // sen\u00e3o conclus\u00e3o da solicita\u00e7\u00e3o; sen\u00e3o chegada na T31/T30 (ainda em andamento).
   var PAGOPER = { chave: '', carregando: false, em: null, datas: {}, extra: {} };
+  var PAGO_OPCOES = [['', 'Pagos: pelo per\u00edodo'], ['hoje', 'Pagos hoje'], ['ontem', 'Pagos ontem'], ['7', 'Pagos nos \u00faltimos 7 dias'],
+                     ['mes', 'Pagos neste m\u00eas'], ['mesant', 'Pagos no m\u00eas anterior'], ['tudo', 'Pagos: todos']];
   function periodoPorPagamento() {
-    var per = periodoEfetivo();
-    return /^a-/.test(per || '');
+    if (stInst.pagoPer === 'tudo') return false;
+    if (stInst.pagoPer) return true;
+    return /^a-/.test(periodoEfetivo() || '');
+  }
+  function intervaloPagos() { return intervaloPeriodo(stInst.pagoPer ? 'a-' + stInst.pagoPer : periodoEfetivo()); }
+  function nomePagos() {
+    if (stInst.pagoPer) { var o = PAGO_OPCOES.filter(function (x) { return x[0] === stInst.pagoPer; })[0]; return o ? o[1].toLowerCase() : ''; }
+    return nomePeriodo(periodoEfetivo()).replace(/^Abertas /, 'pagas ');
   }
   function dataPagamento(it) {
     var d = PAGOPER.datas[it.num];
@@ -4061,7 +4070,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   }
   function carregarPagosPeriodo() {
     if (PAGOPER.carregando || !LC.base || !periodoPorPagamento()) return;
-    var r = intervaloPeriodo(periodoEfetivo()), chave = LC.base + '|' + periodoEfetivo() + '|' + ddmmaaaa(new Date());
+    var r = intervaloPagos(), chave = LC.base + '|' + ddmmaaaa(r.ini) + '|' + ddmmaaaa(r.fim) + '|' + ddmmaaaa(new Date());
     if (PAGOPER.chave === chave && PAGOPER.em && Date.now() - PAGOPER.em.getTime() < 15 * 60000) return;
     PAGOPER.carregando = true; PAGOPER.chave = chave;
     var hoje = new Date(); hoje.setHours(0, 0, 0, 0);
@@ -5300,6 +5309,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         .map(function (k) { return { id: k, name: nomeR[k], dica: RELRD_FORM.carregando ? 'lendo os formul\u00e1rios\u2026' : '' }; });
     }
     if (uiI.fRelStatus) uiI.fRelStatus.style.display = layoutId === 'relrd' ? '' : 'none';
+    if (uiI.fPago) { uiI.fPago.style.display = layoutId === 'comercial' ? '' : 'none'; uiI.fPago.classList.toggle('is-on', !!stInst.pagoPer); }
     if (layoutId === 'rejeitados') {                                  // colunas = motivos presentes na lista
       var cont = {}, nomeM = {};
       lidos.forEach(function (it) {
@@ -5339,7 +5349,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       if (L.espelho) { var esp = L.espelho(it); if (esp && esp !== col && buckets[esp]) buckets[esp].push(it); }   // c\u00f3pia, n\u00e3o move
     });
     if (layoutId === 'comercial' && buckets.fechados && periodoPorPagamento() && PAGOPER.em) {
-      var rP = intervaloPeriodo(periodoEfetivo()), fimP = new Date(rP.fim.getTime() + DIA), jaPG = {};
+      var rP = intervaloPagos(), fimP = new Date(rP.fim.getTime() + DIA), jaPG = {};
       var noPer = function (it) { var d = dataPagamento(it); return d && d >= rP.ini && d < fimP; };
       buckets.fechados = buckets.fechados.filter(function (it) { if (!noPer(it)) return false; jaPG[it.num] = 1; return true; });
       Object.keys(PAGOPER.extra).forEach(function (k) {                // pagas no per\u00edodo, abertas em outros meses
@@ -5702,6 +5712,17 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     uiI.fAtivo.setAttribute('aria-label', 'Tipo de ativo');
     uiI.fAtivo.addEventListener('change', function () { stInst.ativo = uiI.fAtivo.value; ls('lcbKanbanAtivo', stInst.ativo); renderInst(); });
     uiI.tools.appendChild(uiI.fAtivo);
+    uiI.fPago = el('select', 'lcbk-select');
+    uiI.fPago.setAttribute('aria-label', 'Pagos (data do pagamento)');
+    uiI.fPago.title = 'Filtra a coluna Fechados (PAGO) pela data do pagamento (conclus\u00e3o da T31)';
+    PAGO_OPCOES.forEach(function (o) { var op = el('option', null, o[1]); op.value = o[0]; uiI.fPago.appendChild(op); });
+    uiI.fPago.value = stInst.pagoPer;
+    uiI.fPago.addEventListener('change', function () {
+      stInst.pagoPer = uiI.fPago.value; ls('lcbKanbanPagoPer', stInst.pagoPer);
+      PAGOPER.chave = ''; renderInst();
+    });
+    uiI.fPago.style.display = 'none';
+    uiI.tools.appendChild(uiI.fPago);
     uiI.fAtor = el('select', 'lcbk-select');
     uiI.fAtor.setAttribute('aria-label', 'Filtrar por quem est\u00e1 com a atividade');
     uiI.fAtor.addEventListener('change', function () { stInst.ator = uiI.fAtor.value; renderInst(); });
