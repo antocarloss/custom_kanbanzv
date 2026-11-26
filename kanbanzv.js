@@ -543,7 +543,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-26a';
+  var VERSAO = '2026-11-27a';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -2505,7 +2505,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
           .concat(pend)
           .concat([
                    { id: 'cessao', name: 'Proposta assinada pelo cliente', dica: 'T23 em andamento' },
-                   { id: 'fechados', name: 'Fechados (PAGO)', ok: true, dica: 'chegou na T30 (finaliza\u00e7\u00e3o da compra), T31 ou depois, ou conclu\u00edda', encerrada: true },
+                   { id: 'fechados', name: 'Fechados (PAGO)', ok: true, encerrada: true,
+                     dica: periodoPorPagamento() ? 'por data do pagamento (T31) \u00b7 ' + nomePeriodo(periodoEfetivo()).replace(/^Abertas /, 'pagas ') +
+                       (PAGOPER.carregando ? ' \u00b7 lendo as datas de pagamento\u2026' : '')
+                       : 'chegou na T30 (finaliza\u00e7\u00e3o da compra), T31 ou depois, ou conclu\u00edda' },
                    { id: 'perdJur', name: 'Perdidas \u00b7 rejeitada pelo jur\u00eddico', alert: true, dica: 'passou pela reprova\u00e7\u00e3o (T11, T15 ou T16)', encerrada: true },
                    { id: 'perdCli', name: 'Perdidas \u00b7 rejeitada pelo cliente', alert: true, dica: 'cancelada ou recusada pelo cliente', encerrada: true },
                    { id: 'perdNI', name: 'Perdidas \u00b7 motivo n\u00e3o identificado', alert: true, opcional: true, encerrada: true,
@@ -3500,6 +3503,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var fdC = fundoDe(it);
       tags.appendChild(el('span', 'lcbk-chip is-ativo', fdC ? 'Fundo ' + fdC : 'Fundo n\u00e3o informado'));
     }
+    if (it._col && it._col.id === 'fechados' && periodoPorPagamento() && dataPagamento(it)) {
+      var dpg = PAGOPER.datas[it.num];
+      tags.appendChild(el('span', 'lcbk-chip is-pago', 'Pago em ' + fmtData(dataPagamento(it)) + (dpg ? ' (' + dpg.via + ')' : ' (conclus\u00e3o)')));
+    }
     if (it._col && it._col.id === 'prop_hoje' && PHOJE.sols[it.num]) {
       var ph = PHOJE.sols[it.num];
       var chP = el('span', 'lcbk-chip is-tent', 'Proposta feita hoje ' + ph.hora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + (ph.n > 1 ? ' (' + ph.n + 'x)' : ''));
@@ -4038,6 +4045,71 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   // Valores do formul\u00e1rio para o financeiro: o export por fluxo corta em 1.000 linhas, e as negocia\u00e7\u00f5es
   // conclu\u00eddas/antigas ficavam de fora. Aqui l\u00ea por per\u00edodo (dividindo at\u00e9 caber), todas as situa\u00e7\u00f5es.
   var FINFORM = { chave: '', carregando: false, em: null, erro: '' };
+  // \u2500\u2500 Fechados (PAGO) por DATA DO PAGAMENTO (filtro "Abertas \u2026" na esteira comercial)
+  // Data do pagamento = conclus\u00e3o da T31-Auditar Pagamento; sen\u00e3o conclus\u00e3o da T30-Acompanhar Finaliza\u00e7\u00e3o da Compra;
+  // sen\u00e3o conclus\u00e3o da solicita\u00e7\u00e3o; sen\u00e3o chegada na T31/T30 (ainda em andamento).
+  var PAGOPER = { chave: '', carregando: false, em: null, datas: {}, extra: {} };
+  function periodoPorPagamento() {
+    var per = periodoEfetivo();
+    return /^a-/.test(per || '');
+  }
+  function dataPagamento(it) {
+    var d = PAGOPER.datas[it.num];
+    if (d) return d.d;
+    if (!it.ativo && it.fimEm) return it.fimEm;                    // conclu\u00edda: data de conclus\u00e3o da solicita\u00e7\u00e3o
+    return null;
+  }
+  function carregarPagosPeriodo() {
+    if (PAGOPER.carregando || !LC.base || !periodoPorPagamento()) return;
+    var r = intervaloPeriodo(periodoEfetivo()), chave = LC.base + '|' + periodoEfetivo() + '|' + ddmmaaaa(new Date());
+    if (PAGOPER.chave === chave && PAGOPER.em && Date.now() - PAGOPER.em.getTime() < 15 * 60000) return;
+    PAGOPER.carregando = true; PAGOPER.chave = chave;
+    var hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    var ini = new Date(r.fim.getTime() - 400 * DIA), acc = [], fila = [];
+    var enc = '&endBegin=' + encodeURIComponent(ddmmaaaa(r.ini)) + '&endEnd=' + encodeURIComponent(ddmmaaaa(hoje));
+    fluxosNegociacao().forEach(function (f) { fila.push([f, 'S', '', 'S']); fila.push([f, 'S', '', 'N']); fila.push([f, 'N', enc, 'S']); });
+    var est = { consultas: 0, incompleto: 0, taskStatus: 'S' }, i = 0;
+    (function prox() {
+      if (i < fila.length) {
+        var t = fila[i++]; est.taskStatus = t[3];
+        return baixarRecorte(t[0], t[1], ini, hoje, t[2], acc, est).then(prox, prox);
+      }
+      var por = {};
+      acc.forEach(function (x) {
+        if (!x.sol) return;
+        var nm = nomeTarefa(x.nome), o = por[x.sol] || (por[x.sol] = {});
+        if (/auditar pagamento/.test(nm)) { if (x.fin && (!o.t31 || x.fin > o.t31)) o.t31 = x.fin; if (x.rec && (!o.t31r || x.rec > o.t31r)) o.t31r = x.rec; }
+        if (/finalizacao da compra/.test(nm)) { if (x.fin && (!o.t30 || x.fin > o.t30)) o.t30 = x.fin; if (x.rec && (!o.t30r || x.rec > o.t30r)) o.t30r = x.rec; }
+      });
+      var datas = {};
+      Object.keys(por).forEach(function (sol) {
+        var o = por[sol];
+        var d = o.t31 ? [o.t31, 'T31'] : o.t30 ? [o.t30, 'T30'] : o.t31r ? [o.t31r, 'chegada T31'] : o.t30r ? [o.t30r, 'chegada T30'] : null;
+        if (d) datas[sol] = { d: d[0], via: d[1] };
+      });
+      PAGOPER.datas = datas; PAGOPER.em = new Date(); PAGOPER.carregando = false; acc = null;
+      buscarPagosFora(r);
+      renderInst();
+    })();
+  }
+  function buscarPagosFora(r) {                                      // pagas no per\u00edodo, mas abertas em outro m\u00eas (n\u00e3o carregadas)
+    var carregados = {}, fim1 = new Date(r.fim.getTime() + DIA);
+    (LC.completo ? LC.completo.itens : []).forEach(function (it) { carregados[it.num] = 1; });
+    var faltam = Object.keys(PAGOPER.datas).filter(function (s) {
+      var d = PAGOPER.datas[s].d; return d >= r.ini && d < fim1 && !carregados[s] && !PAGOPER.extra[s];
+    }).slice(0, 300);
+    if (!faltam.length || !LC.base) return;
+    var i = 0;
+    (function prox() {
+      if (i >= faltam.length) return renderInst();
+      var sol = faltam[i++], u = new URL(LC.base);
+      ['codFlowsOrServices', 'flowStatus', 'startBegin', 'startEnd', 'endBegin', 'endEnd'].forEach(function (k) { u.searchParams.delete(k); });
+      u.searchParams.set('keyword', sol); u.searchParams.set('pagenumber', '1'); u.searchParams.set('recordsperpage', '10');
+      getJson(nossa(u.href)).then(function (j) {
+        ((j && j.success && j.success.itens) || []).forEach(function (x) { var it = daApi(x); if (it.num === sol) PAGOPER.extra[sol] = it; });
+      }).catch(function () { /* segue */ }).then(function () { if (i % 20 === 0) renderInst(); setTimeout(prox, 120); });
+    })();
+  }
   // Propostas enviadas hoje: negocia\u00e7\u00f5es com a tarefa "Apresentar Proposta\u2026" recebida ou finalizada hoje (log do Zeev)
   var PHOJE = { chave: '', carregando: false, em: null, sols: {} };
   // tarefas em que o vendedor/diretoria FAZ a proposta (ao finalizar, a proposta foi feita)
@@ -5208,6 +5280,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       });
     }
     if (L.propHoje && listaPronta()) carregarPropostasHoje();
+    if (layoutId === 'comercial' && listaPronta() && periodoPorPagamento()) carregarPagosPeriodo();
     if (layoutId === 'relrd') {                                       // colunas = motivos (ordem do funil do RD)
       carregarFormRel();
       var contR = {}, nomeR = {};
@@ -5265,6 +5338,20 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       buckets[col].push(it);
       if (L.espelho) { var esp = L.espelho(it); if (esp && esp !== col && buckets[esp]) buckets[esp].push(it); }   // c\u00f3pia, n\u00e3o move
     });
+    if (layoutId === 'comercial' && buckets.fechados && periodoPorPagamento() && PAGOPER.em) {
+      var rP = intervaloPeriodo(periodoEfetivo()), fimP = new Date(rP.fim.getTime() + DIA), jaPG = {};
+      var noPer = function (it) { var d = dataPagamento(it); return d && d >= rP.ini && d < fimP; };
+      buckets.fechados = buckets.fechados.filter(function (it) { if (!noPer(it)) return false; jaPG[it.num] = 1; return true; });
+      Object.keys(PAGOPER.extra).forEach(function (k) {                // pagas no per\u00edodo, abertas em outros meses
+        var it = PAGOPER.extra[k];
+        if (!it || jaPG[it.num] || it.tipo !== 'filho') return;
+        if (!it._enr) { it._enr = 1; if (it.atividade) { var clX = classificar(it.tipo, it.atividade); it.stage = clX.etapa; it.area = clX.area; } enriquecer(it); }
+        if (stInst.ativo && !combinaAtivo(it, stInst.ativo)) return;
+        if (q && [it.numero, it.titulo, it.processo, it.atividade, it.quem].join(' ').toLowerCase().indexOf(q) === -1) return;
+        if (L.place(it) !== 'fechados' || !noPer(it)) return;
+        jaPG[it.num] = 1; buckets.fechados.push(it);
+      });
+    }
     if (L.propHoje && buckets.prop_hoje) {                            // todas as propostas do dia, de qualquer per\u00edodo ou filtro
       var jaPH = {};
       lidos.concat(PHOJE.extra ? Object.keys(PHOJE.extra).map(function (k) { return PHOJE.extra[k]; }) : []).forEach(function (it) {
