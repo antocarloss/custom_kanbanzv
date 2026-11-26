@@ -133,7 +133,7 @@
       // Negocia\u00e7\u00f5es marcadas como pagas no Zeev que o financeiro N\u00c3O registrou como compra:
       // ficam fora de Fechados (PAGO) / Pagos (v\u00e3o para \"Problema no pagamento\" na Controladoria)
       // at\u00e9 o financeiro confirmar ou o Zeev voltar a tarefa.
-      semCompra: ['30999', '29902'],
+      semCompra: ['29902'],                   // 30999 saiu: o financeiro registrou a compra em 26/11
       // Pagamento no log do Zeev, mas a negocia\u00e7\u00e3o n\u00e3o \u00e9 encontrada na lista (permiss\u00e3o, cancelada
       // ou n\u00e3o criada). Ficam fora da busca e do aviso da coluna, at\u00e9 o time acertar no Zeev.
       pagasIgnoradas: ['25510'],
@@ -556,7 +556,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-27h';
+  var VERSAO = '2026-11-27i';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -2660,6 +2660,84 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       }
     };
   }
+  // \u2550\u2550\u2550 DIRETORIA EXECUTIVA \u00b7 VIS\u00c3O EXECUTIVA \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+  // Uma tela s\u00f3 com a opera\u00e7\u00e3o inteira: espelha as colunas do comercial, do jur\u00eddico e da
+  // Controladoria, SEM mudar nenhuma regra \u2014 as mesmas fun\u00e7\u00f5es de sempre decidem onde o card cai.
+  // Fechados (PAGO) usa a regra \u00fanica (ehPago), ent\u00e3o d\u00e1 o MESMO n\u00famero das outras telas.
+  // Cess\u00e3o e Auditoria s\u00e3o espelhos: o card aparece l\u00e1 e continua contando em Fechados (PAGO).
+  function layoutExecutivo() {
+    return {
+      nome: 'Vis\u00e3o Executiva (opera\u00e7\u00e3o completa)',
+      esteira: 'comercial',
+      propHoje: true,
+      cols: function () {
+        return [
+          { id: 'ppp', name: 'PPP (cliente n\u00e3o responde)', dica: 'abertos neste m\u00eas' },
+          { id: 'ppf', name: 'PPF (proposta futura)', dica: 'abertos neste m\u00eas' },
+          { id: 'negociacao', name: 'PPP Negocia\u00e7\u00e3o', dica: 'ainda sem proposta ao cliente' },
+          { id: 'proposta', name: 'Proposta enviada ao cliente' },
+          { id: 'prop_hoje', name: 'Propostas feitas hoje',
+            dica: PHOJE.carregando && !PHOJE.em ? 'lendo as tarefas de hoje\u2026' : 'espelho: proposta feita hoje \u00b7 o card mostra onde est\u00e1 agora' },
+          { id: 'fecCom', name: 'Proposta Aceita', ok: true, dica: 'em formaliza\u00e7\u00e3o (fora as pend\u00eancias)' },
+          { id: 'analise', name: 'An\u00e1lise Jur\u00eddica', dica: 'documenta\u00e7\u00e3o e an\u00e1lise jur\u00eddica (T10)' },
+          { id: 'pendencias', name: 'Pend\u00eancias', dica: 'pend\u00eancias do comercial e do jur\u00eddico (T16)' },
+          { id: 'contrato', name: 'Contrato & Assinatura', dica: 'contrato, assinatura (T22) e v\u00eddeo de aceite' },
+          { id: 'gestora1', name: 'Aguardando Aprova\u00e7\u00e3o - Fundo 1', dica: 'T27 e T28 \u00b7 Fundo I' },
+          { id: 'gestora2', name: 'Aguardando Aprova\u00e7\u00e3o - Fundo 2', dica: 'T27 e T29 \u00b7 Fundo II' },
+          { id: 'cessaoComp', name: 'Cess\u00e3o e Comprovante de Pagamento', dica: 'cess\u00e3o, protocolo e T30 \u00b7 espelho: as da T30 contam tamb\u00e9m em Fechados (PAGO)' },
+          { id: 'auditoria', name: 'Auditoria de Pagamento', dica: 'espelho: T31-Auditar Pagamento \u00b7 continua contando em Fechados (PAGO)' },
+          { id: 'fechados', name: 'Fechados (PAGO)', ok: true, encerrada: true,
+            dica: periodoPorPagamento() ? 'por data do pagamento \u00b7 ' + nomePagos() + statusPagos()
+              : 'chegou na T30 (finaliza\u00e7\u00e3o da compra), T31 ou depois, ou conclu\u00edda' },
+          { id: 'perdJur', name: 'Perdidas \u00b7 rejeitada pelo jur\u00eddico', alert: true, encerrada: true, dica: 'passou pela reprova\u00e7\u00e3o (T11, T15 ou T16)' },
+          { id: 'perdCli', name: 'Perdidas \u00b7 rejeitada pelo cliente', alert: true, encerrada: true, dica: 'cancelada ou recusada pelo cliente' },
+          { id: 'perdNI', name: 'Perdidas \u00b7 motivo n\u00e3o identificado', alert: true, opcional: true, encerrada: true,
+            dica: PERDA.carregando || (!PERDA.porSol && !PERDA.erro) ? 'lendo o hist\u00f3rico das negocia\u00e7\u00f5es\u2026' : 'hist\u00f3rico n\u00e3o dispon\u00edvel' },
+          // na busca esta coluna deixa de ser opcional: o que for encontrado em qualquer etapa aparece aqui
+          { id: 'outros', name: stInst.busca ? 'Encontradas na busca (outras etapas)' : 'Outras \u00e1reas',
+            opcional: !stInst.busca, outras: !stInst.busca }
+        ];
+      },
+      place: function (it) {
+        if (semCompraFin(it)) return 'outros';
+        if (it.tipo !== 'filho') {                              // leads (Pai): PPF e PPP, mesma regra da triagem
+          if (!it.ativo) return 'outros';
+          var cT = colunaDe('triagem', it);
+          if (cT === 'ppf' || cT === 'ppp') return doMes(it) ? cT : 'outros';
+          var c1 = colunaDe('comercial', it);
+          return ['ppp', 'negociacao', 'proposta', 'pendencias'].indexOf(c1) !== -1 ? c1 : 'outros';
+        }
+        if (!it.ativo) {                                        // encerradas: pago ou perdida (mesma regra do comercial)
+          if (!perdida(it)) return 'fechados';
+          if (!PERDA.porSol && !PERDA.carregando && !PERDA.erro && listaPronta()) setTimeout(carregarMotivosPerda, 0);
+          var mot = PERDA.porSol && PERDA.porSol[it.num];
+          return mot === 'juridico' ? 'perdJur' : mot === 'cliente' ? 'perdCli' : 'perdNI';
+        }
+        if (ehPago(it)) return 'fechados';                      // regra \u00fanica de pago (T30 em diante)
+        if (it.stage === 'gestora' || it.stage === 'solgestora' || /^gestora/.test(it.stage)) {
+          return fundoDe(it) === 'II' ? 'gestora2' : 'gestora1';
+        }
+        var cj = colunaDe('juridico', it);                      // jur\u00eddico: mesmas colunas da esteira jur\u00eddica
+        if (cj === 'documentacao' || cj === 'analise') return 'analise';
+        if (cj === 'reprovacao') return 'pendencias';
+        if (cj === 'contrato' || cj === 'video') return 'contrato';
+        if (cj === 'cessao') return 'cessaoComp';
+        var c2 = colunaDe('comercial', it);                     // comercial
+        if (c2 === 'pendencias') return 'pendencias';
+        if (c2 === 'assinatura') return 'contrato';
+        if (posAceite(it)) return 'fecCom';
+        return ['ppp', 'negociacao', 'proposta'].indexOf(c2) !== -1 ? c2 : 'outros';
+      },
+      // espelhos: o card continua na coluna principal e aparece tamb\u00e9m aqui
+      espelho: function (it) {
+        if (!it.ativo || it.tipo !== 'filho') return '';
+        var nm = nomeTarefa(it.atividade);
+        if (/auditar pagamento/.test(nm)) return 'auditoria';
+        if (/finalizacao da compra/.test(nm)) return 'cessaoComp';
+        return '';
+      }
+    };
+  }
   function comColunaAdministrativo(L) {
     var cols0 = L.cols;
     L.cols = function () {
@@ -2688,6 +2766,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     return L;
   }
   var LAYOUTS_INST = {
+    executivo: layoutExecutivo(),
     comercial: comColunaAdministrativo(layoutEsteiraInst('comercial')),
     comercialExec: comPropostasHoje(comColunaAdministrativo(layoutEsteiraInst('comercial'))),
     juridico: layoutEsteiraInst('juridico'),
@@ -3586,7 +3665,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function financeiroLiberado() { return ls(CFG.keys.financeiro) === 'on'; }
   // Organiza\u00e7\u00e3o do seletor: diretoria \u2192 pipelines. Um pipeline pode aparecer em mais de uma diretoria.
   var AREAS_PIPE = [
-    { id: 'executiva', nome: 'Diretoria Executiva', itens: [['comercialExec', 'Comercial'], ['juridico', 'Jur\u00eddico Anal\u00edtico'], ['triagem', 'Triagem']] },
+    { id: 'executiva', nome: 'Diretoria Executiva', itens: [['executivo', 'Vis\u00e3o Executiva'], ['comercialExec', 'Comercial'], ['juridico', 'Jur\u00eddico Anal\u00edtico'], ['triagem', 'Triagem']] },
     { id: 'comercial', nome: 'Diretoria Comercial', itens: [['comercial', 'Pipeline Comercial'], ['diretor', 'Pipeline Diretor Comercial'],
       ['triagem', 'Pipeline da Triagem'], ['inatividade', 'Pipeline Inatividade'], ['relnovos', 'Pipeline Relacionamento'],
       ['rejeitados', 'Pipeline Rejeitados'], ['status', 'Pipeline Status'], ['relrd', 'Pipeline Relacionamento RD']] },
@@ -5387,7 +5466,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       });
     }
     if (L.propHoje && listaPronta()) carregarPropostasHoje();
-    var COL_PAGO = { comercial: 'fechados', juridico: 'pos', diretor: 'st_pago' }[layoutId] || '';
+    var COL_PAGO = { comercial: 'fechados', comercialExec: 'fechados', executivo: 'fechados', juridico: 'pos', diretor: 'st_pago' }[layoutId] || '';
     if (COL_PAGO && listaPronta() && periodoPorPagamento()) carregarPagosPeriodo();
     if (layoutId === 'relrd') {                                       // colunas = motivos (ordem do funil do RD)
       carregarFormRel();
