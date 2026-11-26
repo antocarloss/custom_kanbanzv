@@ -556,7 +556,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-27l';
+  var VERSAO = '2026-11-27o';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -2278,11 +2278,23 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   // Marcada como paga no Zeev, mas sem compra no relat\u00f3rio do financeiro: fica fora das colunas de pago.
   function semCompraFin(it) { return it.tipo === 'filho' && (CFG.producao.semCompra || []).indexOf(String(it.num)) !== -1; }
   // Regra \u00daNICA de \"pago\", igual em todos os pipelines (comercial, diretor e jur\u00eddico):
-  // chegou na T30 (finaliza\u00e7\u00e3o da compra), T31 ou depois, ou a negocia\u00e7\u00e3o foi conclu\u00edda sem perda.
+  // chegou na T31-Auditar Pagamento ou depois (ou concluiu com comprovante) \u2014 a T30 n\u00e3o conta.
   // Fica de fora o que o financeiro n\u00e3o registrou como compra.
+  // Chegou na T31-Auditar Pagamento (ou concluiu com comprovante)? \u00c9 a pergunta da Controladoria.
+  // A T30-Acompanhar Finaliza\u00e7\u00e3o da Compra sozinha N\u00c3O \u00e9 pagamento.
+  function chegouAuditoria(it) {
+    var f = (FORM.porSol || {})[it.num] || {};
+    if (f.comprovante && f.dtConcl) return true;
+    if (PAGOPER.datas[it.num]) return true;                        // log: T31 (a T30 n\u00e3o entra mais)
+    if (it.ativo) return it.stage === 'pos' && !/finalizacao da compra/.test(nomeTarefa(it.atividade));
+    return false;
+  }
   function ehPago(it) {
     if (it.tipo !== 'filho' || semCompraFin(it)) return false;
-    return it.ativo ? it.stage === 'pos' : !perdida(it);
+    if (it.ativo) return chegouAuditoria(it);
+    // conclu\u00edda: com o log de pagamento carregado, vale o crit\u00e9rio da Controladoria;
+    // sem o log (per\u00edodo que n\u00e3o filtra por pagamento), vale conclu\u00edda sem perda, como antes.
+    return !perdida(it) && (!PAGOPER.em || chegouAuditoria(it));
   }
   // Triagem: lead rejeitado = desqualificado (motivo no resumo), viabilidade "desqualificado" ou encerrado como rejeitado/cancelado
   function rejeitadoTriagem(it) {
@@ -2406,6 +2418,37 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (ehT01 && !inf.propN) return it.late ? 'tentativa' : 'novo';
     return 'negociacao';
   }
+  // Quem sou eu, deduzido das tarefas que est\u00e3o comigo: o respons\u00e1vel delas sou eu.
+  var EU_NOME = '';
+  function descobrirMeuNome(lidos) {
+    if (!MEU.nums) return EU_NOME;
+    var cont = {}, melhor = '', n = 0;
+    lidos.forEach(function (it) {
+      if (!MEU.nums[it.num] || !it.quem || it.fila) return;
+      var q = it.quem.split(',')[0].trim();
+      if (!q) return;
+      cont[q] = (cont[q] || 0) + 1;
+      if (cont[q] > n) { n = cont[q]; melhor = q; }
+    });
+    if (melhor) EU_NOME = melhor;
+    return EU_NOME;
+  }
+  function meuLead(it) {                                   // negocia\u00e7\u00e3o em que eu sou o dono (vendedor do card)
+    if (!EU_NOME || it.tipo !== 'filho') return false;
+    var d = (it.info || {}).dono || '';
+    return !!d && lower(d).indexOf(lower(EU_NOME)) === 0;
+  }
+  function pagoNoMes(it) { var d = dataPagamento(it); return !!d && d >= inicioDoMes(); }
+  // Em que fase do jur\u00eddico o lead est\u00e1 (mesmos nomes da esteira jur\u00eddica)
+  function faseJuridica(it) {
+    if (it.stage === 'gestora' || it.stage === 'solgestora' || /^gestora/.test(it.stage)) {
+      if (it.stage === 'solgestora') return 'Solicitar aprova\u00e7\u00e3o da gestora';
+      return 'Aprova\u00e7\u00e3o da gestora \u00b7 Fundo ' + (fundoDe(it) === 'II' ? 'II' : 'I');
+    }
+    var cj = colunaDe('juridico', it), cols = CFG.esteiras.juridico.cols;
+    for (var i = 0; i < cols.length; i++) if (cols[i][0] === cj) return cols[i][1];
+    return 'Com o jur\u00eddico';
+  }
   function donoDe(it) {
     var inf = it.info || {};
     if (it.tipo === 'filho' && inf.dono) return inf.dono;
@@ -2522,20 +2565,33 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         var base = colunasEsteira(id).filter(function (c) { return ['ppp', 'negociacao', 'proposta', 'pendencias'].indexOf(c.id) !== -1; })
           .map(function (c) { c.precisaB = false; if (nomes[c.id]) c.name = nomes[c.id]; if (dicas[c.id]) c.dica = dicas[c.id]; return c; });
         var pend = base.filter(function (c) { return c.id === 'pendencias'; });   // Pend\u00eancias vai para depois de Proposta Aceita
+        var meu = !!stInst.comigo;                                   // vis\u00e3o individual: s\u00f3 o que \u00e9 seu
         return [{ id: 'ppf', name: 'PPF (proposta futura)', dica: 'abertos neste m\u00eas' }]
           .concat(base.filter(function (c) { return c.id !== 'pendencias'; }))
           .concat([{ id: 'fecCom', name: 'Proposta Aceita', ok: true, dica: 'em formaliza\u00e7\u00e3o (fora as pend\u00eancias)' }])
           .concat(pend)
+          .concat(meu ? [{ id: 'juridicoCol', name: 'Jur\u00eddico',
+                           dica: 'espelho: seus leads com o jur\u00eddico \u00b7 o card mostra em que fase est\u00e3o' }] : [])
           .concat([
                    { id: 'cessao', name: 'Proposta assinada pelo cliente', dica: 'T23 em andamento' },
                    { id: 'fechados', name: 'Fechados (PAGO)', ok: true, encerrada: true,
-                     dica: periodoPorPagamento() ? 'por data do pagamento \u00b7 ' + nomePagos() + statusPagos()
-                       : 'chegou na T30 (finaliza\u00e7\u00e3o da compra), T31 ou depois, ou conclu\u00edda' },
+                     dica: meu ? 'os seus, pagos neste m\u00eas'
+                       : periodoPorPagamento() ? 'por data do pagamento \u00b7 ' + nomePagos() + statusPagos()
+                       : 'chegou na T31-Auditar Pagamento ou depois (mesmo crit\u00e9rio da Controladoria)' }]
+          .concat(meu ? [{ id: 'fechadosGeral', name: 'Fechados Geral', ok: true, encerrada: true,
+                           dica: 'os seus, pagos nos meses anteriores' }] : [])
+          .concat([
                    { id: 'perdJur', name: 'Perdidas \u00b7 rejeitada pelo jur\u00eddico', alert: true, dica: 'passou pela reprova\u00e7\u00e3o (T11, T15 ou T16)', encerrada: true },
                    { id: 'perdCli', name: 'Perdidas \u00b7 rejeitada pelo cliente', alert: true, dica: 'cancelada ou recusada pelo cliente', encerrada: true },
                    { id: 'perdNI', name: 'Perdidas \u00b7 motivo n\u00e3o identificado', alert: true, opcional: true, encerrada: true,
                      dica: PERDA.carregando || (!PERDA.porSol && !PERDA.erro) ? 'lendo o hist\u00f3rico das negocia\u00e7\u00f5es\u2026' : 'hist\u00f3rico n\u00e3o dispon\u00edvel' },
-                   { id: 'outros', name: 'Outras \u00e1reas', opcional: true, outras: true }]);
+                   { id: 'outros', name: 'Outras \u00e1reas', opcional: true, outras: true }]));
+      },
+      // espelho: com "Comigo", o lead que est\u00e1 com o jur\u00eddico tamb\u00e9m aparece na coluna Jur\u00eddico,
+      // sem sair da coluna comercial dele \u2014 com a fase do jur\u00eddico escrita no card.
+      espelho: function (it) {
+        return stInst.comigo && it.ativo && it.tipo === 'filho' &&
+          (it.area === 'juridico' || it.area === 'conselho') ? 'juridicoCol' : '';
       },
       place: function (it) {
         if (semCompraFin(it)) return 'outros';                      // paga no Zeev, sem compra no financeiro
@@ -2547,14 +2603,15 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
           return ['ppp', 'negociacao', 'proposta', 'pendencias'].indexOf(c1) !== -1 ? c1 : 'outros';
         }
         if (!it.ativo) {
-          if (!perdida(it)) return 'fechados';
+          if (!perdida(it)) return stInst.comigo && !pagoNoMes(it) ? 'fechadosGeral' : 'fechados';
           if (!PERDA.porSol && !PERDA.carregando && !PERDA.erro && listaPronta()) setTimeout(carregarMotivosPerda, 0);
           var mot = PERDA.porSol && PERDA.porSol[it.num];
           var idade = PERDA.em ? Date.now() - PERDA.em.getTime() : 0;
           if (!PERDA.carregando && PERDA.em && (idade > 30 * 60000 || (!mot && idade > 5 * 60000))) setTimeout(carregarMotivosPerda, 0);
           return mot === 'juridico' ? 'perdJur' : mot === 'cliente' ? 'perdCli' : 'perdNI';
         }
-        if (ehPago(it)) return 'fechados';                           // regra \u00fanica de pago (T30 em diante)
+        if (ehPago(it)) return stInst.comigo && !pagoNoMes(it) ? 'fechadosGeral' : 'fechados';
+        if (/finalizacao da compra/.test(nomeTarefa(it.atividade))) return 'cessao';   // T30: comprada, pagamento ainda n\u00e3o auditado
         if (it.stage === 'cessao' || it.stage === 'solgestora' || /^gestora/.test(it.stage)) return 'cessao';
         var c2 = colunaDe(id, it);
         if (c2 === 'pendencias') return 'pendencias';
@@ -2575,7 +2632,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
           if (c.id === 'pos') {
             c.name = 'Pagos'; c.ok = true; c.encerrada = true;
             c.dica = periodoPorPagamento() ? 'por data do pagamento \u00b7 ' + nomePagos() + statusPagos()
-              : 'chegou na T30 (finaliza\u00e7\u00e3o da compra), T31 ou depois, ou conclu\u00edda';
+              : 'chegou na T31-Auditar Pagamento ou depois (mesmo crit\u00e9rio da Controladoria)';
           }
           return c;
         })
@@ -2586,7 +2643,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       place: function (it) {
         // mesma regra do comercial: Pagos = passou da T24 (p\u00f3s-cess\u00e3o) ou negocia\u00e7\u00e3o conclu\u00edda sem perda
         if (semCompraFin(it)) return 'outros';                      // paga no Zeev, sem compra no financeiro
-        if (ehPago(it)) return 'pos';                               // regra \u00fanica de pago (T30 em diante)
+        if (ehPago(it)) return 'pos';                               // regra \u00fanica de pago (T31 em diante)
+        if (it.ativo && /finalizacao da compra/.test(nomeTarefa(it.atividade))) return 'cessao';   // T30
         if (it.ativo && it.stage === 'gestora') return fundoDe(it) === 'II' ? 'gestora2' : 'gestora1';
         if (!it.ativo) {
           if (it.tipo !== 'filho' || !perdida(it)) return 'outros';
@@ -2694,7 +2752,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         { id: 'auditoria', name: 'Auditoria de Pagamento', dica: 'espelho: T31-Auditar Pagamento \u00b7 continua contando em Fechados (PAGO)' },
         { id: 'fechados', name: 'Fechados (PAGO)', ok: true, encerrada: true,
           dica: periodoPorPagamento() ? 'por data do pagamento \u00b7 ' + nomePagos() + statusPagos()
-            : 'chegou na T30 (finaliza\u00e7\u00e3o da compra), T31 ou depois, ou conclu\u00edda' },
+            : 'chegou na T31-Auditar Pagamento ou depois (mesmo crit\u00e9rio da Controladoria)' },
         { id: 'perdJur', name: 'Perdidas \u00b7 rejeitada pelo jur\u00eddico', alert: true, encerrada: true, dica: 'passou pela reprova\u00e7\u00e3o (T11, T15 ou T16)' },
         { id: 'perdCli', name: 'Perdidas \u00b7 rejeitada pelo cliente', alert: true, encerrada: true, dica: 'cancelada ou recusada pelo cliente' },
         { id: 'perdNI', name: 'Perdidas \u00b7 motivo n\u00e3o identificado', alert: true, opcional: true, encerrada: true,
@@ -2721,7 +2779,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         var mot = PERDA.porSol && PERDA.porSol[it.num];
         return mot === 'juridico' ? 'perdJur' : mot === 'cliente' ? 'perdCli' : 'perdNI';
       }
-      if (ehPago(it)) return 'fechados';                        // regra \u00fanica de pago (T30 em diante)
+      if (ehPago(it)) return 'fechados';                        // regra \u00fanica de pago (T31 em diante)
+      if (/finalizacao da compra/.test(nomeTarefa(it.atividade))) return 'cessaoComp';   // T30
       if (it.stage === 'gestora' || it.stage === 'solgestora' || /^gestora/.test(it.stage)) {
         return fundoDe(it) === 'II' ? 'gestora2' : 'gestora1';
       }
@@ -2747,7 +2806,6 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         var esp = [], nm = nomeTarefa(it.atividade);
         if (ehPropostaAceita(it)) esp.push('fecCom');
         if (/auditar pagamento/.test(nm)) esp.push('auditoria');
-        else if (/finalizacao da compra/.test(nm)) esp.push('cessaoComp');
         return esp;
       }
     };
@@ -2762,7 +2820,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       c.splice(i >= 0 ? i + 1 : c.length - 1, 0, col);
       return c;
     };
-    L.espelho = function (it) { return comAdministrativo(it) ? 'administrativo' : ''; };
+    var esp0 = L.espelho;                                           // mant\u00e9m os espelhos que j\u00e1 existiam
+    L.espelho = function (it) {
+      var out = [];
+      if (esp0) { var e0 = esp0(it); (e0 && e0.push ? e0 : [e0]).forEach(function (x) { if (x) out.push(x); }); }
+      if (comAdministrativo(it)) out.push('administrativo');
+      return out;
+    };
     return L;
   }
   // Diretoria Executiva \u2192 Comercial: mesma esteira + coluna "Propostas enviadas hoje" (todas as do dia)
@@ -3625,6 +3689,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       tags.appendChild(el('span', 'lcbk-chip is-pago', 'Pago em ' + fmtData(dataPagamento(it)) +
         (dFin ? ' (financeiro)' : dpg ? ' (' + dpg.via + ')' : ' (conclus\u00e3o)')));
     }
+    if (it._col && it._col.id === 'juridicoCol') {
+      var chJ = el('span', 'lcbk-chip is-pago', 'Jur\u00eddico: ' + faseJuridica(it));
+      chJ.title = 'Fase do jur\u00eddico em que esta negocia\u00e7\u00e3o est\u00e1 agora';
+      tags.appendChild(chJ);
+    }
     if (semCompraFin(it)) {
       var chSC = el('span', 'lcbk-chip is-ativo', 'Sem compra no financeiro');
       chSC.title = 'Marcada como paga no Zeev, mas o financeiro n\u00e3o registrou a compra. Fora de Fechados (PAGO) at\u00e9 ser confirmada.';
@@ -4247,7 +4316,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     if (dF) { var dd = lerData(dF); if (dd) return dd; }
     var d = PAGOPER.datas[it.num];
     if (d) return d.d;
-    if (!it.ativo && it.fimEm) return it.fimEm;                    // conclu\u00edda: data de conclus\u00e3o da solicita\u00e7\u00e3o
+    if (!it.ativo && it.fimEm && !PAGOPER.em) return it.fimEm;     // sem o log: data de conclus\u00e3o
     return null;
   }
   function carregarPagosPeriodo() {
@@ -4272,11 +4341,22 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         if (/auditar pagamento/.test(nm)) { if (x.fin && (!o.t31 || x.fin > o.t31)) o.t31 = x.fin; if (x.rec && (!o.t31r || x.rec > o.t31r)) o.t31r = x.rec; }
         if (/finalizacao da compra/.test(nm)) { if (x.fin && (!o.t30 || x.fin > o.t30)) o.t30 = x.fin; if (x.rec && (!o.t30r || x.rec > o.t30r)) o.t30r = x.rec; }
       });
+      // Mesmo crit\u00e9rio da Controladoria: s\u00f3 entra quem CHEGOU na T31-Auditar Pagamento (ou concluiu
+      // com comprovante). A T30 N\u00c3O conta. Data: campo do formul\u00e1rio > comprovante > T31.
       var datas = {};
       Object.keys(por).forEach(function (sol) {
-        var o = por[sol];
-        var d = o.t31 ? [o.t31, 'T31'] : o.t30 ? [o.t30, 'T30'] : o.t31r ? [o.t31r, 'chegada T31'] : o.t30r ? [o.t30r, 'chegada T30'] : null;
-        if (d) datas[sol] = { d: d[0], via: d[1] };
+        var o = por[sol], f = (FORM.porSol || {})[sol] || {};
+        var chegou = o.t31 || o.t31r || (f.comprovante && f.dtConcl);
+        if (!chegou) return;
+        var d = f.dtPag ? [new Date(f.dtPag), 'formul\u00e1rio']
+          : (f.comprovante && f.dtConcl) ? [new Date(f.dtConcl), 'comprovante']
+          : o.t31 ? [o.t31, 'T31'] : [o.t31r, 'chegada T31'];
+        if (d[0]) datas[sol] = { d: d[0], via: d[1] };
+      });
+      Object.keys(FORM.porSol || {}).forEach(function (sol) {        // conclu\u00eddas com comprovante, sem tarefa no log
+        var f = FORM.porSol[sol];
+        if (datas[sol] || !f || !f.comprovante || !f.dtConcl) return;
+        datas[sol] = { d: f.dtPag ? new Date(f.dtPag) : new Date(f.dtConcl), via: 'comprovante' };
       });
       PAGOPER.datas = datas; PAGOPER.em = new Date(); PAGOPER.carregando = false; acc = null;
       buscarPagosFora(r);
@@ -5439,7 +5519,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       lidos.forEach(function (it) { ja[it.num] = 1; });
       LB.itens.forEach(function (it) { if (!ja[it.num]) lidos.push(it); });
     }
-    if (stInst.comigo && MEU.nums) lidos = lidos.filter(function (it) { return MEU.nums[it.num]; });
+    if (stInst.comigo && MEU.nums) {
+      descobrirMeuNome(lidos);                                       // sem isso, s\u00f3 as tarefas que est\u00e3o comigo
+      lidos = lidos.filter(function (it) { return MEU.nums[it.num] || meuLead(it); });
+    }
     var ehFundo = /^fundo/.test(layoutId);
     montarFiltroAtivo(lidos.filter(function (it) { return !L.esteira || L.place(it) !== 'outros'; }));
     var semRecorte = !ehFundo && (buscando || stInst.comigo);         // busca e "Comigo" ignoram esteira/time/pessoa (exceto nos fundos)
@@ -5480,7 +5563,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       });
     }
     if (L.propHoje && listaPronta()) carregarPropostasHoje();
-    var COL_PAGO = { comercial: 'fechados', comercialExec: 'fechados', executivo: 'fechados', juridico: 'pos', diretor: 'st_pago' }[layoutId] || '';
+    var COL_PAGO = stInst.comigo ? '' :                              // vis\u00e3o individual: pago = m\u00eas corrente
+      ({ comercial: 'fechados', comercialExec: 'fechados', executivo: 'fechados', juridico: 'pos', diretor: 'st_pago' }[layoutId] || '');
     if (COL_PAGO && listaPronta() && periodoPorPagamento()) carregarPagosPeriodo();
     if (layoutId === 'relrd') {                                       // colunas = motivos (ordem do funil do RD)
       carregarFormRel();
