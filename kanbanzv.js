@@ -134,6 +134,9 @@
       // ficam fora de Fechados (PAGO) / Pagos (v\u00e3o para \"Problema no pagamento\" na Controladoria)
       // at\u00e9 o financeiro confirmar ou o Zeev voltar a tarefa.
       semCompra: ['30999', '29902'],
+      // Pagamento no log do Zeev, mas a negocia\u00e7\u00e3o n\u00e3o \u00e9 encontrada na lista (permiss\u00e3o, cancelada
+      // ou n\u00e3o criada). Ficam fora da busca e do aviso da coluna, at\u00e9 o time acertar no Zeev.
+      pagasIgnoradas: ['25510'],
       propostasPagas: ['1863', '1864', '1865', '1866', '1867', '1870', '1873', '1874', '1875',
                        '3717', '3752', '3787', '3791', '3795'],
       // PPP com o vendedor: campo "Tentativas de contato" (no resumo do Zeev). 0 = Novo; 1 a 4 = Tentativa de
@@ -553,7 +556,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-27d';
+  var VERSAO = '2026-11-27e';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -4144,8 +4147,10 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function buscarPagosFora(r) {                                      // pagas no per\u00edodo, mas abertas em outro m\u00eas (n\u00e3o carregadas)
     var carregados = {}, fim1 = new Date(r.fim.getTime() + DIA);
     (LC.completo ? LC.completo.itens : []).forEach(function (it) { carregados[it.num] = 1; });
+    var ign = CFG.producao.pagasIgnoradas || [];
     var faltam = Object.keys(PAGOPER.datas).filter(function (s) {
-      var d = PAGOPER.datas[s].d; return d >= r.ini && d < fim1 && !carregados[s] && !PAGOPER.extra[s];
+      var d = PAGOPER.datas[s].d;
+      return d >= r.ini && d < fim1 && !carregados[s] && !PAGOPER.extra[s] && ign.indexOf(String(s)) === -1;
     }).slice(0, 300);
     PAGOPER.pend = faltam.length; PAGOPER.naoAchadas = [];
     if (!faltam.length || !LC.base) { renderInst(); return; }
