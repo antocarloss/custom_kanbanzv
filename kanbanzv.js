@@ -196,7 +196,7 @@
       maxItens: 25000,       // teto absoluto por carga
       tamanhoPagina: 500,    // pede p\u00e1ginas grandes; se o Zeev limitar, o script se ajusta
       cardsPorColuna: 100,   // desenha at\u00e9 isso por coluna ("Mostrar mais" para o resto); contagens s\u00e3o do total
-      paralelo: 8,           // p\u00e1ginas lidas ao mesmo tempo na carga completa
+      paralelo: 4,           // p\u00e1ginas lidas ao mesmo tempo na carga completa
       cacheHoras: 12,        // validade da c\u00f3pia local criptografada da lista
       funilAcima: 3000,      // esteira comercial/jur\u00eddica numa lista maior que isso, sem filtro de fluxo: carrega s\u00f3 o funil
       atualizarMin: 2,       // rel\u00ea a lista completa sozinho a cada X min (aba vis\u00edvel), sem piscar a tela
@@ -556,7 +556,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-27r';
+  var VERSAO = '2026-11-27s';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -4102,11 +4102,11 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     });
   }
   // Roda as consultas em paralelo, com um limite de quantas ao mesmo tempo (n\u00e3o afoga o Zeev).
-  function emParalelo(tarefas, quantas) {
+  function emParalelo(tarefas, quantas, erros) {
     var i = 0;
     function trilha() {
       if (i >= tarefas.length) return Promise.resolve();
-      return tarefas[i++]().then(trilha, trilha);
+      return tarefas[i++]().then(trilha, function (e) { if (erros) erros.push(e); return trilha(); });
     }
     var t = []; for (var k = 0; k < Math.min(quantas, tarefas.length || 1); k++) t.push(trilha());
     return Promise.all(t);
@@ -4114,12 +4114,18 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
   function carregarFormularios() {
     if (FORM.carregando || !LC.url) return;
     FORM.carregando = true; FORM.erro = ''; FORM.incompleto = 0; FORM.feitas = 0;
-    var base = LC.base || baseDe(LC.url), por = {};
+    var base = LC.base || baseDe(LC.url), por = {}, erros = [];
     var filhos = fluxosNegociacao();
-    // primeiro o fluxo inteiro, sem filtro de data (\u00e9 o que o Zeev responde melhor); s\u00f3 se vier
-    // cortado em 1.000 linhas \u00e9 que divide por per\u00edodo, metade a metade, em paralelo.
+    // um fluxo de cada vez: o export \u00e9 pesado e o Zeev devolve vazio quando recebe v\u00e1rios juntos.
+    // S\u00f3 divide por per\u00edodo se vier cortado em 1.000 linhas.
     var tarefas = filhos.map(function (f) { return function () { return lerFormExport(f, null, null, por, 0); }; });
-    esperarLista().then(function () { return emParalelo(tarefas, 6); }).then(function () {
+    esperarLista().then(function () { return emParalelo(tarefas, 1, erros); }).then(function () {
+      var lidos = Object.keys(por).length;
+      if (!lidos) {                                                 // nada voltou: n\u00e3o apaga o que j\u00e1 estava lido
+        FORM.erro = erros.length ? ((erros[0] && erros[0].message) || 'erro') : 'o Zeev devolveu vazio';
+        return;
+      }
+      if (erros.length) FORM.erro = 'parte dos fluxos n\u00e3o respondeu';
       if (FORM.base === base) Object.keys(por).forEach(function (k) { FORM.porSol[k] = por[k]; });   // junta: n\u00e3o apaga o que o financeiro leu
       else FORM.porSol = por;
       FORM.em = new Date(); FORM.base = base; setTimeout(salvarCache, 0);
@@ -4383,7 +4389,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         });
       };
     });
-    emParalelo(tarefas, 6).then(function () { PAGOPER.pend = 0; renderInst(); });
+    emParalelo(tarefas, 4).then(function () { PAGOPER.pend = 0; renderInst(); });
   }
   // Propostas enviadas hoje: negocia\u00e7\u00f5es com a tarefa "Apresentar Proposta\u2026" recebida ou finalizada hoje (log do Zeev)
   var PHOJE = { chave: '', carregando: false, em: null, sols: {} };
@@ -5496,11 +5502,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         lerFormPai(flF[iF++], { limpo: true }, new Date(hojeF.getTime() - 240 * DIA), hojeF, {}).then(proxF, proxF);
       })();
     }
-    if (layoutId === 'financeiro' || ((layoutId === 'comercial' || layoutId === 'juridico' || layoutId === 'diretor') && lidos.some(function (it) { return it.tipo === 'filho'; }))) {
+    var COM_VALORES = ['comercial', 'comercialExec', 'executivo', 'juridico', 'diretor'];   // telas que mostram valor de face e valor pago
+    if (layoutId === 'financeiro' || (COM_VALORES.indexOf(layoutId) !== -1 && lidos.some(function (it) { return it.tipo === 'filho'; }))) {
       var velhoF = !FORM.em || FORM.base !== LC.base || Date.now() - FORM.em.getTime() > 10 * 60000;
       if (velhoF && !FORM.carregando && listaPronta() && !(FORM.erro && FORM.base === LC.base)) setTimeout(carregarFormularios, 0);
     }
-    if ((layoutId === 'triagem' || layoutId === 'inatividade' || layoutId === 'relnovos' || layoutId === 'comercial' || layoutId === 'diretor') &&
+    if ((layoutId === 'triagem' || layoutId === 'inatividade' || layoutId === 'relnovos' || layoutId === 'comercial' ||
+         layoutId === 'comercialExec' || layoutId === 'executivo' || layoutId === 'diretor') &&
         listaPronta() && !FORMP.carregando && lidos.some(function (it) { return it.tipo !== 'filho'; })) {
       var modoP = layoutId === 'inatividade' || layoutId === 'relnovos' ? layoutId : 'triagem';
       var chaveP = LC.base + '|' + modoP;
@@ -5884,6 +5892,7 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
         !FORM.em && LC.carregando ? ' | valores e motivos entram quando a lista terminar' : FORM.erro ? ' | valores indispon\u00edveis (' + FORM.erro + ')' :
         FORM.incompleto ? ' | valores: export cortado em 1.000 linhas' :
         ' | valores: ' + fmtN(Object.keys(FORM.porSol || {}).length) + ' negocia\u00e7\u00f5es lidas') : '') +
+      (FORM.erro ? ' | \u26a0 VALORES N\u00c3O LIDOS (' + FORM.erro + '): valor de face e valor pago podem estar errados' : '') +
       (LC.completo && LC.completo.daCopia && LC.carregando ? ' | c\u00f3pia salva, atualizando\u2026' : '') +
       (layoutId === 'comercial' && FORM.em ? (function () {
         var achadas = {}, pagas = CFG.producao.propostasPagas || [];
