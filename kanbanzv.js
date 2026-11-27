@@ -556,7 +556,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-27o';
+  var VERSAO = '2026-11-27q';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -2286,7 +2286,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var f = (FORM.porSol || {})[it.num] || {};
     if (f.comprovante && f.dtConcl) return true;
     if (PAGOPER.datas[it.num]) return true;                        // log: T31 (a T30 n\u00e3o entra mais)
-    if (it.ativo) return it.stage === 'pos' && !/finalizacao da compra/.test(nomeTarefa(it.atividade));
+    // em andamento: s\u00f3 depois da auditoria \u2014 parado na T30 ou na pr\u00f3pria T31 ainda n\u00e3o \u00e9 pago
+    if (it.ativo) return it.stage === 'pos' && !/finalizacao da compra|auditar pagamento/.test(nomeTarefa(it.atividade));
     return false;
   }
   function ehPago(it) {
@@ -4083,11 +4084,15 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     u.pathname = u.pathname.replace(/\/instances\/?$/, '/instances/export/requests/csvsemicolon');
     ['pagenumber', 'recordsperpage', 'keyword', 'startBegin', 'startEnd', 'endBegin', 'endEnd'].forEach(function (k) { u.searchParams.delete(k); });
     u.searchParams.set('codFlowsOrServices', f[0] + ';' + f[1] + ';0;0');
-    u.searchParams.set('startBegin', ddmmaaaa(ini)); u.searchParams.set('startEnd', ddmmaaaa(fim));
+    if (ini && fim) { u.searchParams.set('startBegin', ddmmaaaa(ini)); u.searchParams.set('startEnd', ddmmaaaa(fim)); }
     return getJson(nossa(u.href)).then(function (j) {
       var n = lerFormCsv(decodificar(j && j.success && j.success.fileContent), por);
       FORM.feitas++;
       if (n < CFG.producao.limiteLinhas) return;
+      if (!ini || !fim) {                                           // bateu no corte: a\u00ed sim divide por data
+        var jan = janelaFormularios(), hj = new Date(Date.now() + DIA);
+        return lerFormExport(f, jan, hj, por, 1);
+      }
       var dias = Math.round((fim - ini) / DIA);
       if (dias < 1 || (prof || 0) >= 6) { FORM.incompleto++; return; }
       var meio = new Date(ini.getTime() + Math.floor(dias / 2) * DIA), dep = new Date(meio.getTime() + DIA);
@@ -4111,22 +4116,9 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     FORM.carregando = true; FORM.erro = ''; FORM.incompleto = 0; FORM.feitas = 0;
     var base = LC.base || baseDe(LC.url), por = {};
     var filhos = fluxosNegociacao();
-    var iniJ = janelaFormularios(), fimJ = new Date(Date.now() + DIA);
-    // Quantos peda\u00e7os j\u00e1 na primeira rodada: estimado pelo tamanho da lista carregada, para n\u00e3o
-    // gastar uma consulta inteira s\u00f3 para descobrir que bateu no corte.
-    var nLista = ((LC.completo && LC.completo.itens) || []).length;
-    var peds = Math.max(1, Math.min(16, Math.ceil(nLista / (CFG.producao.limiteLinhas * 0.7))));
-    var totDias = Math.max(1, Math.round((fimJ - iniJ) / DIA)), passo = Math.ceil(totDias / peds);
-    var faixas = [];
-    for (var d = 0; d < totDias; d += passo) {
-      var a = new Date(iniJ.getTime() + d * DIA);
-      var b = new Date(Math.min(fimJ.getTime(), iniJ.getTime() + (d + passo - 1) * DIA));
-      faixas.push([a, b]);
-    }
-    var tarefas = [];
-    filhos.forEach(function (f) {
-      faixas.forEach(function (fx) { tarefas.push(function () { return lerFormExport(f, fx[0], fx[1], por, 0); }); });
-    });
+    // primeiro o fluxo inteiro, sem filtro de data (\u00e9 o que o Zeev responde melhor); s\u00f3 se vier
+    // cortado em 1.000 linhas \u00e9 que divide por per\u00edodo, metade a metade, em paralelo.
+    var tarefas = filhos.map(function (f) { return function () { return lerFormExport(f, null, null, por, 0); }; });
     esperarLista().then(function () { return emParalelo(tarefas, 6); }).then(function () {
       if (FORM.base === base) Object.keys(por).forEach(function (k) { FORM.porSol[k] = por[k]; });   // junta: n\u00e3o apaga o que o financeiro leu
       else FORM.porSol = por;
@@ -4346,11 +4338,13 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var datas = {};
       Object.keys(por).forEach(function (sol) {
         var o = por[sol], f = (FORM.porSol || {})[sol] || {};
-        var chegou = o.t31 || o.t31r || (f.comprovante && f.dtConcl);
+        // igual \u00e0 Controladoria: T31-Auditar Pagamento FINALIZADA (ou conclu\u00edda com comprovante).
+        // Chegar na T31 e parar ali N\u00c3O \u00e9 pagamento \u2014 isso \u00e9 auditoria em andamento.
+        var chegou = o.t31 || (f.comprovante && f.dtConcl);
         if (!chegou) return;
         var d = f.dtPag ? [new Date(f.dtPag), 'formul\u00e1rio']
           : (f.comprovante && f.dtConcl) ? [new Date(f.dtConcl), 'comprovante']
-          : o.t31 ? [o.t31, 'T31'] : [o.t31r, 'chegada T31'];
+          : [o.t31, 'T31'];
         if (d[0]) datas[sol] = { d: d[0], via: d[1] };
       });
       Object.keys(FORM.porSol || {}).forEach(function (sol) {        // conclu\u00eddas com comprovante, sem tarefa no log
@@ -5887,7 +5881,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       (FORMP.carregando ? ' | lendo valores dos leads\u2026' : FORMP.erro && layoutId !== 'comercial' && layoutId !== 'juridico' ? ' | valores dos leads indispon\u00edveis (' + FORMP.erro + ')' : '') +
       (layoutId === 'comercial' || layoutId === 'juridico' ? (FORM.carregando ? ' | lendo valores das negocia\u00e7\u00f5es\u2026' :
         !FORM.em && LC.carregando ? ' | valores e motivos entram quando a lista terminar' : FORM.erro ? ' | valores indispon\u00edveis (' + FORM.erro + ')' :
-        FORM.incompleto ? ' | valores: export cortado em 1.000 linhas' : '') : '') +
+        FORM.incompleto ? ' | valores: export cortado em 1.000 linhas' :
+        ' | valores: ' + fmtN(Object.keys(FORM.porSol || {}).length) + ' negocia\u00e7\u00f5es lidas') : '') +
       (LC.completo && LC.completo.daCopia && LC.carregando ? ' | c\u00f3pia salva, atualizando\u2026' : '') +
       (layoutId === 'comercial' && FORM.em ? (function () {
         var achadas = {}, pagas = CFG.producao.propostasPagas || [];
