@@ -556,7 +556,7 @@
   })();
 
   // vers\u00e3o do script: aparece na barra (ajuda no suporte) e zera escolhas salvas por vers\u00f5es antigas
-  var VERSAO = '2026-11-27q';
+  var VERSAO = '2026-11-27r';
   if (ls('lcbKanbanVersao') !== VERSAO) {
     if (ls('lcbKanbanVersao') !== '2026-10-21') { try { localStorage.removeItem('lcbKanbanLayout'); } catch (e) {} }
     ls('lcbKanbanVersao', VERSAO);
@@ -2286,8 +2286,8 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
     var f = (FORM.porSol || {})[it.num] || {};
     if (f.comprovante && f.dtConcl) return true;
     if (PAGOPER.datas[it.num]) return true;                        // log: T31 (a T30 n\u00e3o entra mais)
-    // em andamento: s\u00f3 depois da auditoria \u2014 parado na T30 ou na pr\u00f3pria T31 ainda n\u00e3o \u00e9 pago
-    if (it.ativo) return it.stage === 'pos' && !/finalizacao da compra|auditar pagamento/.test(nomeTarefa(it.atividade));
+    // em andamento: chegou na T31 j\u00e1 \u00e9 pago (a T30 sozinha n\u00e3o \u00e9)
+    if (it.ativo) return it.stage === 'pos' && !/finalizacao da compra/.test(nomeTarefa(it.atividade));
     return false;
   }
   function ehPago(it) {
@@ -4338,13 +4338,14 @@ function fmtN(n) { return Number(n).toLocaleString('pt-BR'); }
       var datas = {};
       Object.keys(por).forEach(function (sol) {
         var o = por[sol], f = (FORM.porSol || {})[sol] || {};
-        // igual \u00e0 Controladoria: T31-Auditar Pagamento FINALIZADA (ou conclu\u00edda com comprovante).
-        // Chegar na T31 e parar ali N\u00c3O \u00e9 pagamento \u2014 isso \u00e9 auditoria em andamento.
-        var chegou = o.t31 || (f.comprovante && f.dtConcl);
+        // IGUAL \u00e0 Controladoria: a negocia\u00e7\u00e3o CHEGA na T31-Auditar Pagamento quando o fundo paga,
+        // ent\u00e3o a data \u00e9 a CHEGADA na T31, n\u00e3o a finaliza\u00e7\u00e3o dela.
+        // Ordem de confian\u00e7a: campo do formul\u00e1rio > conclu\u00edda com comprovante > chegada na T31.
+        var chegou = o.t31r || o.t31 || (f.comprovante && f.dtConcl);
         if (!chegou) return;
         var d = f.dtPag ? [new Date(f.dtPag), 'formul\u00e1rio']
           : (f.comprovante && f.dtConcl) ? [new Date(f.dtConcl), 'comprovante']
-          : [o.t31, 'T31'];
+          : [o.t31r || o.t31, 'T31'];
         if (d[0]) datas[sol] = { d: d[0], via: d[1] };
       });
       Object.keys(FORM.porSol || {}).forEach(function (sol) {        // conclu\u00eddas com comprovante, sem tarefa no log
